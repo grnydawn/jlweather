@@ -3,8 +3,25 @@ using Match
 using MPI
 using Debugger
 using Printf
-#using NetCDF
 using NCDatasets
+using Pkg
+
+### PyPlot package test ###
+try
+   global PyPlotTest = @eval import PyPlot
+catch e
+   global PyPlotTest = false
+   println(e)
+end
+
+if PyPlotTest == nothing
+   using PyPlot
+   const draw = true
+else
+   println("Error while loading the PyPlot package. Skip displaying process.")
+   const draw = false
+end
+###########################
 
 ##############
 # constants
@@ -30,7 +47,7 @@ else
     const OUT_FREQ    = Float64(100.0)
     const DATA_SPEC   = Int64(1)
 end
-    
+
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
 const I_END = trunc(Int, round(NPER*(MYRANK+1)))
@@ -111,7 +128,6 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
-  
     #Initialize the grid and the data  
     (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
@@ -120,12 +136,9 @@ function main(args::Vector{String})
     #Initial reductions for mass, kinetic energy, and total energy
     local mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
-    #println(state[:,:,ID_DENS])
-
     #Output the initial state
     output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
 
-    
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
 
@@ -150,7 +163,6 @@ function main(args::Vector{String})
           output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
           output_counter = output_counter - OUT_FREQ
         end
-
     end
 
     local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
@@ -213,14 +225,12 @@ function init!()
             z = (K_BEG-1 + k-0.5) * DZ + (qpoints[kk]-0.5)*DZ
 
             #Set the fluid state based on the user's specification
-            r, u, w, t, hr, ht = @match data_spec_int begin
-                DATA_SPEC_COLLISION       => collision!(x,z)
-                DATA_SPEC_THERMAL         => thermal!(x,z)
-                DATA_SPEC_MOUNTAIN        => mountain_waves!(x,z)
-                DATA_SPEC_TURBULENCE      => turbulence!(x,z)
-                DATA_SPEC_DENSITY_CURRENT => density_current!(x,z)
-                DATA_SPEC_INJECTION       => injection!(x,z)
-            end
+            if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(x,z)      ; end
+            if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(x,z)        ; end
+            if(DATA_SPEC==DATA_SPEC_MOUNTAIN)       ; r,u,w,t,hr,ht = mountain_waves!(x,z) ; end
+            if(DATA_SPEC==DATA_SPEC_TURBULENCE)     ; r,u,w,t,hr,ht = turbulence!(x,z)     ; end
+            if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(x,z); end
+            if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(x,z)      ; end
 
             #Store into the fluid state array
             state[i,k,ID_DENS] = state[i,k,ID_DENS] + r                         * qweights[ii]*qweights[kk]
@@ -240,14 +250,12 @@ function init!()
             z = (K_BEG-1 + k-0.5) * DZ + (qpoints[kk]-0.5)*DZ
             
             #Set the fluid state based on the user's specification
-            r, u, w, t, hr, ht = @match data_spec_int begin
-                DATA_SPEC_COLLISION       => collision!(0.0,z)
-                DATA_SPEC_THERMAL         => thermal!(0.0,z)
-                DATA_SPEC_MOUNTAIN        => mountain_waves!(0.0,z)
-                DATA_SPEC_TURBULENCE      => turbulence!(0.0,z)
-                DATA_SPEC_DENSITY_CURRENT => density_current!(0.0,z)
-                DATA_SPEC_INJECTION       => injection!(0.0,z)
-            end           
+            if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(0.0,z)      ; end
+            if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(0.0,z)        ; end
+            if(DATA_SPEC==DATA_SPEC_MOUNTAIN)       ; r,u,w,t,hr,ht = mountain_waves!(0.0,z) ; end
+            if(DATA_SPEC==DATA_SPEC_TURBULENCE)     ; r,u,w,t,hr,ht = turbulence!(0.0,z)     ; end
+            if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(0.0,z); end
+            if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(0.0,z)      ; end
 
             hy_dens_cell[k]       = hy_dens_cell[k]       + hr    * qweights[kk]
             hy_dens_theta_cell[k] = hy_dens_theta_cell[k] + hr*ht * qweights[kk]
@@ -257,19 +265,18 @@ function init!()
     #Compute the hydrostatic background state at vertical cell interfaces
     for k in 1:NZ+1
         z = (K_BEG-1 + k-1) * DZ
-        #Set the fluid state based on the user's specification
-        r, u, w, t, hr, ht = @match data_spec_int begin
-            DATA_SPEC_COLLISION       => collision!(0.0,z)
-            DATA_SPEC_THERMAL         => thermal!(0.0,z)
-            DATA_SPEC_MOUNTAIN        => mountain_waves!(0.0,z)
-            DATA_SPEC_TURBULENCE      => turbulence!(0.0,z)
-            DATA_SPEC_DENSITY_CURRENT => density_current!(0.0,z)
-            DATA_SPEC_INJECTION       => injection!(0.0,z)
-        end                  
 
-      hy_dens_int[k] = hr
-      hy_dens_theta_int[k] = hr*ht
-      hy_pressure_int[k] = C0*(hr*ht)^GAMMA
+        #Set the fluid state based on the user's specification
+        if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(0.0,z)      ; end
+        if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(0.0,z)        ; end
+        if(DATA_SPEC==DATA_SPEC_MOUNTAIN)       ; r,u,w,t,hr,ht = mountain_waves!(0.0,z) ; end
+        if(DATA_SPEC==DATA_SPEC_TURBULENCE)     ; r,u,w,t,hr,ht = turbulence!(0.0,z)     ; end
+        if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(0.0,z); end
+        if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(0.0,z)      ; end
+
+        hy_dens_int[k] = hr
+        hy_dens_theta_int[k] = hr*ht
+        hy_pressure_int[k] = C0*(hr*ht)^GAMMA
     end
     
     return (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
@@ -341,7 +348,7 @@ function thermal!(x::Float64, z::Float64)
     t  = Float64(0.0) # Potential temperature
     u  = Float64(0.0) # Uwind
     w  = Float64(0.0) # Wwind
-    
+
     t = t + sample_ellipse_cosine!(x,z,3.0,XLEN/2,2000.0,2000.0,2000.0) 
 
     return r, u, w, t, hr, ht
@@ -852,6 +859,11 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
           # Close NetCDF file
           close(ds)
 
+          # Display the first output frame
+          if draw
+             display!(var_global,etime)
+          end
+
        else
 
           # Open NetCDF output file with an append mode
@@ -871,8 +883,51 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
           # Close NetCDF file
           close(ds)
 
+          # Display the last output frame
+          if(draw && etime + DT + OUT_FREQ >= SIM_TIME)
+             display!(var_global,etime)
+          end
+
        end # etime
     end # MASTER
+
+end
+
+
+function display!(var::Array{Float64, 3},
+                  etime::Float64)
+          # Display
+          fig = figure("out",figsize=(8,5.5))
+          subplots_adjust(hspace=0.1)
+          extent=[0,XLEN/1000.0,0,ZLEN/1000.0]
+          suptitle(string("Julia Miniweather
+                  \nnx=",NX_GLOB,"; nz=",NZ_GLOB,"; Time=",@sprintf("%.1f",etime)," s"))
+          subplot(221)
+             xlabel("X (km)")
+             ylabel("Z (km)")
+             title("Density")
+             imshow(transpose(reverse(var[:,:,ID_DENS],dims=2)),extent=extent)
+          subplot(222)
+             xlabel("X (km)")
+             ylabel("Z (km)")
+             title("Potential temperature")
+             imshow(transpose(reverse(var[:,:,ID_RHOT],dims=2)),extent=extent)
+          subplot(223)
+             xlabel("X (km)")
+             ylabel("Z (km)")
+             title("U-wind component")
+             imshow(transpose(reverse(var[:,:,ID_UMOM],dims=2)),extent=extent,cmap="bwr")
+          subplot(224)
+             xlabel("X (km)")
+             ylabel("Z (km)")
+             title("W-wind component")
+             imshow(transpose(reverse(var[:,:,ID_WMOM],dims=2)),extent=extent,cmap="bwr")
+
+          if (etime == 0.0)
+             savefig("fig_oInit.png",bbox_inches="tight")
+          else
+             savefig("fig_oEnd.png",bbox_inches="tight")
+          end
 end
 
 function finalize!(state::OffsetArray{Float64, 3, Array{Float64, 3}})

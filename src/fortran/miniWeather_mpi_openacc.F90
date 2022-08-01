@@ -11,7 +11,13 @@ program miniweather
   use mpi
   implicit none
   !Declare the precision for the real constants (at least 15 digits of accuracy = double precision)
+#ifdef SINGLE_PREC
+  integer , parameter :: rp = selected_real_kind(6)
+  integer , parameter :: mpi_type = MPI_REAL
+#else
   integer , parameter :: rp = selected_real_kind(15)
+  integer , parameter :: mpi_type = MPI_REAL8
+#endif
   !Define some physical constants to use throughout the simulation
   real(rp), parameter :: pi        = 3.14159265358979323846264338327_rp   !Pi
   real(rp), parameter :: grav      = 9.8_rp                               !Gravitational acceleration (m / s^2)
@@ -24,7 +30,7 @@ program miniweather
   !Define domain and stability-related constants
   real(rp), parameter :: xlen      = 2.e4_rp    !Length of the domain in the x-direction (meters)
   real(rp), parameter :: zlen      = 1.e4_rp    !Length of the domain in the z-direction (meters)
-  real(rp), parameter :: hv_beta   = 0.25_rp     !How strong to diffuse the solution: hv_beta \in [0:1]
+  real(rp), parameter :: hv_beta   = 0.05_rp    !How strong to diffuse the solution: hv_beta \in [0:1]
   real(rp), parameter :: cfl       = 1.50_rp    !"Courant, Friedrichs, Lewy" number (for numerical stability)
   real(rp), parameter :: max_speed = 450        !Assumed maximum wave speed during the simulation (speed of sound + speed of wind) (meter / sec)
   integer , parameter :: hs        = 2          !"Halo" size: number of cells beyond the MPI tasks's domain needed for a full "stencil" of information for reconstruction
@@ -40,46 +46,55 @@ program miniweather
   integer , parameter :: DIR_Z = 2              !Integer constant to express that this operation is in the z-direction
   integer , parameter :: DATA_SPEC_COLLISION       = 1
   integer , parameter :: DATA_SPEC_THERMAL         = 2
-  integer , parameter :: DATA_SPEC_MOUNTAIN        = 3
-  integer , parameter :: DATA_SPEC_TURBULENCE      = 4
+  integer , parameter :: DATA_SPEC_GRAVITY_WAVES   = 3
   integer , parameter :: DATA_SPEC_DENSITY_CURRENT = 5
   integer , parameter :: DATA_SPEC_INJECTION       = 6
 
   !Gauss-Legendre quadrature points and weights on the domain [0:1]
   integer , parameter :: nqpoints = 3
-  real(rp) :: qpoints (nqpoints) = (/ 0.112701665379258311482073460022E0_rp , 0.500000000000000000000000000000E0_rp , 0.887298334620741688517926539980E0_rp /)
-  real(rp) :: qweights(nqpoints) = (/ 0.277777777777777777777777777779E0_rp , 0.444444444444444444444444444444E0_rp , 0.277777777777777777777777777779E0_rp /)
+  real(rp), parameter :: qpoints (nqpoints) = (/ 0.112701665379258311482073460022E0_rp , 0.500000000000000000000000000000E0_rp , 0.887298334620741688517926539980E0_rp /)
+  real(rp), parameter :: qweights(nqpoints) = (/ 0.277777777777777777777777777779E0_rp , 0.444444444444444444444444444444E0_rp , 0.277777777777777777777777777779E0_rp /)
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !! BEGIN USER-CONFIGURABLE PARAMETERS
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !The x-direction length is twice as long as the z-direction length
+  !So, you'll want to have nx_glob be twice as large as nz_glob
+  integer , parameter :: nx_glob = _NX              !Number of total grid cells in the x dimension
+  integer , parameter :: nz_glob = _NZ              !Number of total grid cells in the z dimension
+  real(rp), parameter :: sim_time = _SIM_TIME       !How many seconds to run the simulation
+  real(rp), parameter :: output_freq = _OUT_FREQ    !How frequently to output data to file (in seconds)
+  integer , parameter :: data_spec_int = _DATA_SPEC !How to initialize the data
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !! END USER-CONFIGURABLE PARAMETERS
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !! Variables that are initialized but remain static over the coure of the simulation
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  real(rp) :: sim_time                          !total simulation time in seconds
-  real(rp) :: output_freq                       !frequency to perform output in seconds
-  real(rp) :: dt                                !Model time step (seconds)
-  integer  :: nx, nz                            !Number of local grid cells in the x- and z- dimensions for this MPI task
-  real(rp) :: dx, dz                            !Grid space length in x- and z-dimension (meters)
-  integer  :: nx_glob, nz_glob                  !Number of total grid cells in the x- and z- dimensions
-  integer  :: i_beg, k_beg                      !beginning index in the x- and z-directions for this MPI task
-  integer  :: nranks, myrank                    !Number of MPI ranks and my rank id
-  integer  :: left_rank, right_rank             !MPI Rank IDs that exist to my left and right in the global domain
-  logical  :: masterproc                        !Am I the master process (rank == 0)?
-  real(rp) :: data_spec_int                     !Which data initialization to use
-  real(rp), allocatable :: hy_dens_cell      (:)      !hydrostatic density (vert cell avgs).   Dimensions: (1-hs:nz+hs)
-  real(rp), allocatable :: hy_dens_theta_cell(:)      !hydrostatic rho*t (vert cell avgs).     Dimensions: (1-hs:nz+hs)
-  real(rp), allocatable :: hy_dens_int       (:)      !hydrostatic density (vert cell interf). Dimensions: (1:nz+1)
-  real(rp), allocatable :: hy_dens_theta_int (:)      !hydrostatic rho*t (vert cell interf).   Dimensions: (1:nz+1)
-  real(rp), allocatable :: hy_pressure_int   (:)      !hydrostatic press (vert cell interf).   Dimensions: (1:nz+1)
+  real(rp) :: dt                                  !Model time step (seconds)
+  integer  :: nx, nz                              !Number of local grid cells in the x- and z- dimensions for this MPI task
+  real(rp) :: dx, dz                              !Grid space length in x- and z-dimension (meters)
+  integer  :: i_beg, k_beg                        !beginning index in the x- and z-directions for this MPI task
+  integer  :: nranks, myrank                      !Number of MPI ranks and my rank id
+  integer  :: left_rank, right_rank               !MPI Rank IDs that exist to my left and right in the global domain
+  logical  :: mainproc                          !Am I the main process (rank == 0)?
+  real(rp), allocatable :: hy_dens_cell      (:)  !hydrostatic density (vert cell avgs).   Dimensions: (1-hs:nz+hs)
+  real(rp), allocatable :: hy_dens_theta_cell(:)  !hydrostatic rho*t (vert cell avgs).     Dimensions: (1-hs:nz+hs)
+  real(rp), allocatable :: hy_dens_int       (:)  !hydrostatic density (vert cell interf). Dimensions: (1:nz+1)
+  real(rp), allocatable :: hy_dens_theta_int (:)  !hydrostatic rho*t (vert cell interf).   Dimensions: (1:nz+1)
+  real(rp), allocatable :: hy_pressure_int   (:)  !hydrostatic press (vert cell interf).   Dimensions: (1:nz+1)
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !! Variables that are dynamics over the course of the simulation
+  !! Variables that are dynamic over the course of the simulation
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   real(rp) :: etime                             !Elapsed model time
   real(rp) :: output_counter                    !Helps determine when it's time to do output
   !Runtime variable arrays
-  real(rp), allocatable :: state             (:,:,:)  !Fluid state.                            Dimensions: (1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
-  real(rp), allocatable :: state_tmp         (:,:,:)  !Fluid state.                            Dimensions: (1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
-  real(rp), allocatable :: flux              (:,:,:)  !Cell interface fluxes.                  Dimensions: (nx+1,nz+1,NUM_VARS)
-  real(rp), allocatable :: tend              (:,:,:)  !Fluid state tendencies.                 Dimensions: (nx,nz,NUM_VARS)
+  real(rp), allocatable :: state    (:,:,:)     !Fluid state.                            Dimensions: (1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
+  real(rp), allocatable :: state_tmp(:,:,:)     !Fluid state.                            Dimensions: (1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
+  real(rp), allocatable :: flux     (:,:,:)     !Cell interface fluxes.                  Dimensions: (nx+1,nz+1,NUM_VARS)
+  real(rp), allocatable :: tend     (:,:,:)     !Fluid state tendencies.                 Dimensions: (nx,nz,NUM_VARS)
   real(rp), allocatable :: sendbuf_l(:,:,:)     !buffers for MPI data exchanges. Dimensions: (hs,nz,NUM_VARS)
   real(rp), allocatable :: sendbuf_r(:,:,:)     !buffers for MPI data exchanges. Dimensions: (hs,nz,NUM_VARS)
   real(rp), allocatable :: recvbuf_l(:,:,:)     !buffers for MPI data exchanges. Dimensions: (hs,nz,NUM_VARS)
@@ -92,28 +107,10 @@ program miniweather
   !! THE MAIN PROGRAM STARTS HERE
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !! BEGIN USER-CONFIGURABLE PARAMETERS
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !The x-direction length is twice as long as the z-direction length
-  !So, you'll want to have nx_glob be twice as large as nz_glob
-  nx_glob = _NX        !Number of total cells in the x-dirction
-  nz_glob = _NZ        !Number of total cells in the z-dirction
-  sim_time = _SIM_TIME !How many seconds to run the simulation
-  output_freq = _OUT_FREQ  !How frequently to output data to file (in seconds)
-  data_spec_int = _DATA_SPEC !How to initialize the data
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !! END USER-CONFIGURABLE PARAMETERS
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
   !Initialize MPI, allocate arrays, initialize the grid and the data
-  call init()
+  call init(dt)
 
-  !$acc enter data create(state, state_tmp, flux, tend, hy_dens_cell, hy_dens_theta_cell, &
-  !$acc&            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
-  !$acc update device(hy_dens_cell, hy_dens_theta_cell, &
-  !$acc&            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
+  !$acc data copyin(state_tmp,hy_dens_cell,hy_dens_theta_cell,hy_dens_int,hy_dens_theta_int,hy_pressure_int) create(flux,tend,sendbuf_l,sendbuf_r,recvbuf_l,recvbuf_r) copy(state)
 
   !Initial reductions for mass, kinetic energy, and total energy
   call reductions(mass0,te0)
@@ -124,14 +121,17 @@ program miniweather
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !! MAIN TIME STEP LOOP
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  if (masterproc) call system_clock(t1)
+  !$acc wait
+  if (mainproc) call system_clock(t1)
   do while (etime < sim_time)
     !If the time step leads to exceeding the simulation time, shorten it for the last step
     if (etime + dt > sim_time) dt = sim_time - etime
     !Perform a single time step
     call perform_timestep(state,state_tmp,flux,tend,dt)
     !Inform the user
-    if (masterproc) write(*,*) 'Elapsed Time: ', etime , ' / ' , sim_time
+#ifndef NO_INFORM
+    if (mainproc) write(*,*) 'Elapsed Time: ', etime , ' / ' , sim_time
+#endif
     !Update the elapsed time and output counter
     etime = etime + dt
     output_counter = output_counter + dt
@@ -141,11 +141,8 @@ program miniweather
       call output(state,etime)
     endif
   enddo
-
-  !$acc exit data delete(state, state_tmp, flux, tend, hy_dens_cell, hy_dens_theta_cell, &
-  !$acc&          hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
-  if (masterproc) then
+  !$acc wait
+  if (mainproc) then
     call system_clock(t2,rate)
     write(*,*) "CPU Time: ",dble(t2-t1)/dble(rate)
   endif
@@ -153,7 +150,9 @@ program miniweather
   !Final reductions for mass, kinetic energy, and total energy
   call reductions(mass,te)
 
-  if (masterproc) then
+  !$acc end data
+
+  if (mainproc) then
     write(*,*) "d_mass: ", (mass - mass0)/mass0
     write(*,*) "d_te:   ", (te   - te0  )/te0
   endif
@@ -220,26 +219,46 @@ contains
     real(rp), intent(in   ) :: dt
     integer , intent(in   ) :: dir
     integer :: i,k,ll
+    real(rp) :: x, z, wpert, dist, x0, z0, xrad, zrad, amp
 
     if     (dir == DIR_X) then
       !Set the halo values for this MPI task's fluid state in the x-direction
       call set_halo_values_x(state_forcing)
       !Compute the time tendencies for the fluid state in the x-direction
-      call compute_tendencies_x(state_forcing,flux,tend)
+      call compute_tendencies_x(state_forcing,flux,tend,dt)
     elseif (dir == DIR_Z) then
       !Set the halo values for this MPI task's fluid state in the z-direction
       call set_halo_values_z(state_forcing)
       !Compute the time tendencies for the fluid state in the z-direction
-      call compute_tendencies_z(state_forcing,flux,tend)
+      call compute_tendencies_z(state_forcing,flux,tend,dt)
     endif
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Apply the tendencies to the fluid state
+    !$acc parallel loop collapse(3) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
+          if (data_spec_int == DATA_SPEC_GRAVITY_WAVES) then
+            x = (i_beg-1 + i-0.5_rp) * dx
+            z = (k_beg-1 + k-0.5_rp) * dz
+            ! The following requires "acc routine" in OpenACC and "declare target" in OpenMP offload
+            ! Neither of these are particularly well supported by compilers, so I'm manually inlining
+            ! wpert = sample_ellipse_cosine( x,z , 0.01_rp , xlen/8,1000._rp, 500._rp,500._rp )
+            x0 = xlen/8
+            z0 = 1000
+            xrad = 500
+            zrad = 500
+            amp = 0.01_rp
+            !Compute distance from bubble center
+            dist = sqrt( ((x-x0)/xrad)**2 + ((z-z0)/zrad)**2 ) * pi / 2._rp
+            !If the distance from bubble center is less than the radius, create a cos**2 profile
+            if (dist <= pi / 2._rp) then
+              wpert = amp * cos(dist)**2
+            else
+              wpert = 0._rp
+            endif
+            tend(i,k,ID_WMOM) = tend(i,k,ID_WMOM) + wpert*hy_dens_cell(k)
+          endif
           state_out(i,k,ll) = state_init(i,k,ll) + dt * tend(i,k,ll)
         enddo
       enddo
@@ -251,25 +270,18 @@ contains
   !Since the halos are set in a separate routine, this will not require MPI
   !First, compute the flux vector at each cell interface in the x-direction (including hyperviscosity)
   !Then, compute the tendencies using those fluxes
-  subroutine compute_tendencies_x(state,flux,tend)
+  subroutine compute_tendencies_x(state,flux,tend,dt)
     implicit none
     real(rp), intent(in   ) :: state(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
     real(rp), intent(  out) :: flux (nx+1,nz+1,NUM_VARS)
     real(rp), intent(  out) :: tend (nx,nz,NUM_VARS)
+    real(rp), intent(in   ) :: dt
     integer :: i,k,ll,s
     real(rp) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
-
-    !$acc update device(state)
-
     !Compute the hyperviscosity coeficient
     hv_coef = -hv_beta * dx / (16*dt)
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Compute fluxes in the x-direction for each cell
-
-    !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) &
-    !$acc& present(state, hy_dens_cell, hy_dens_theta_cell, flux)
+    !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
     do k = 1 , nz
       do i = 1 , nx+1
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
@@ -298,12 +310,8 @@ contains
       enddo
     enddo
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Use the fluxes to compute tendencies for each cell
-
-    !$acc parallel loop collapse(3) present(flux, tend)
+    !$acc parallel loop collapse(3) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -311,9 +319,6 @@ contains
         enddo
       enddo
     enddo
-
-    !$acc update host(tend)
-
   end subroutine compute_tendencies_x
 
 
@@ -321,25 +326,18 @@ contains
   !Since the halos are set in a separate routine, this will not require MPI
   !First, compute the flux vector at each cell interface in the z-direction (including hyperviscosity)
   !Then, compute the tendencies using those fluxes
-  subroutine compute_tendencies_z(state,flux,tend)
+  subroutine compute_tendencies_z(state,flux,tend,dt)
     implicit none
     real(rp), intent(in   ) :: state(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
     real(rp), intent(  out) :: flux (nx+1,nz+1,NUM_VARS)
     real(rp), intent(  out) :: tend (nx,nz,NUM_VARS)
+    real(rp), intent(in   ) :: dt
     integer :: i,k,ll,s
     real(rp) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
-
-    !$acc update device(state)
-
     !Compute the hyperviscosity coeficient
     hv_coef = -hv_beta * dz / (16*dt)
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Compute fluxes in the x-direction for each cell
-
-    !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) &
-    !$acc& present(state, hy_dens_int, hy_dens_theta_int, hy_pressure_int, flux)
+    !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
     do k = 1 , nz+1
       do i = 1 , nx
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
@@ -373,12 +371,8 @@ contains
       enddo
     enddo
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Use the fluxes to compute tendencies for each cell
-
-    !$acc parallel loop collapse(3) present(flux, state, tend)
+    !$acc parallel loop collapse(3) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -389,9 +383,6 @@ contains
         enddo
       enddo
     enddo
-
-    !$acc update host(tend)
-
   end subroutine compute_tendencies_z
 
 
@@ -402,11 +393,25 @@ contains
     integer :: k, ll, s, ierr, req_r(2), req_s(2), status(MPI_STATUS_SIZE,2)
     real(rp) :: z
 
+    if (nranks == 1) then
+      !$acc parallel loop collapse(2) async
+      do ll = 1 , NUM_VARS
+        do k = 1 , nz
+          state(-1  ,k,ll) = state(nx-1,k,ll)
+          state(0   ,k,ll) = state(nx  ,k,ll)
+          state(nx+1,k,ll) = state(1   ,k,ll)
+          state(nx+2,k,ll) = state(2   ,k,ll)
+        enddo
+      enddo
+      return
+    endif
+
     !Prepost receives
-    call mpi_irecv(recvbuf_l,hs*nz*NUM_VARS,MPI_REAL8, left_rank,0,MPI_COMM_WORLD,req_r(1),ierr)
-    call mpi_irecv(recvbuf_r,hs*nz*NUM_VARS,MPI_REAL8,right_rank,1,MPI_COMM_WORLD,req_r(2),ierr)
+    call mpi_irecv(recvbuf_l,hs*nz*NUM_VARS,mpi_type, left_rank,0,MPI_COMM_WORLD,req_r(1),ierr)
+    call mpi_irecv(recvbuf_r,hs*nz*NUM_VARS,mpi_type,right_rank,1,MPI_COMM_WORLD,req_r(2),ierr)
 
     !Pack the send buffers
+    !$acc parallel loop collapse(3) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do s = 1 , hs
@@ -416,14 +421,20 @@ contains
       enddo
     enddo
 
+    !$acc update host(sendbuf_l,sendbuf_r) async
+    !$acc wait
+
     !Fire off the sends
-    call mpi_isend(sendbuf_l,hs*nz*NUM_VARS,MPI_REAL8, left_rank,1,MPI_COMM_WORLD,req_s(1),ierr)
-    call mpi_isend(sendbuf_r,hs*nz*NUM_VARS,MPI_REAL8,right_rank,0,MPI_COMM_WORLD,req_s(2),ierr)
+    call mpi_isend(sendbuf_l,hs*nz*NUM_VARS,mpi_type, left_rank,1,MPI_COMM_WORLD,req_s(1),ierr)
+    call mpi_isend(sendbuf_r,hs*nz*NUM_VARS,mpi_type,right_rank,0,MPI_COMM_WORLD,req_s(2),ierr)
 
     !Wait for receives to finish
     call mpi_waitall(2,req_r,status,ierr)
 
+    !$acc update device(recvbuf_l,recvbuf_r) async
+
     !Unpack the receive buffers
+    !$acc parallel loop collapse(3) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do s = 1 , hs
@@ -438,6 +449,7 @@ contains
 
     if (data_spec_int == DATA_SPEC_INJECTION) then
       if (myrank == 0) then
+        !$acc parallel loop async
         do k = 1 , nz
           z = (k_beg-1 + k-0.5_rp)*dz
           if (abs(z-3*zlen/4) <= zlen/16) then
@@ -456,11 +468,7 @@ contains
     implicit none
     real(rp), intent(inout) :: state(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
     integer :: i, ll
-    real(rp), parameter :: mnt_width = xlen/8
-    real(rp) :: x, xloc, mnt_deriv
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !$acc parallel loop collapse(2) async
     do ll = 1 , NUM_VARS
       do i = 1-hs,nx+hs
         if (ll == ID_WMOM) then
@@ -468,18 +476,11 @@ contains
           state(i,0   ,ll) = 0
           state(i,nz+1,ll) = 0
           state(i,nz+2,ll) = 0
-          !Impose the vertical momentum effects of an artificial cos^2 mountain at the lower boundary
-          if (data_spec_int == DATA_SPEC_MOUNTAIN) then
-            x = (i_beg-1+i-0.5_rp)*dx
-            if ( abs(x-xlen/4) < mnt_width ) then
-              xloc = (x-(xlen/4)) / mnt_width
-              !Compute the derivative of the fake mountain
-              mnt_deriv = -pi*cos(pi*xloc/2)*sin(pi*xloc/2)*10/dx
-              !w = (dz/dx)*u
-              state(i,-1,ID_WMOM) = mnt_deriv*state(i,1,ID_UMOM)
-              state(i,0 ,ID_WMOM) = mnt_deriv*state(i,1,ID_UMOM)
-            endif
-          endif
+        else if (ll == ID_UMOM) then
+          state(i,-1  ,ll) = state(i,1 ,ll) / hy_dens_cell( 1) * hy_dens_cell(-1  )
+          state(i,0   ,ll) = state(i,1 ,ll) / hy_dens_cell( 1) * hy_dens_cell( 0  )
+          state(i,nz+1,ll) = state(i,nz,ll) / hy_dens_cell(nz) * hy_dens_cell(nz+1)
+          state(i,nz+2,ll) = state(i,nz,ll) / hy_dens_cell(nz) * hy_dens_cell(nz+2)
         else
           state(i,-1  ,ll) = state(i,1 ,ll)
           state(i,0   ,ll) = state(i,1 ,ll)
@@ -492,8 +493,9 @@ contains
 
 
   !Initialize some grid settings, initialize MPI, allocate data, and initialize the full grid and data
-  subroutine init()
+  subroutine init(dt)
     implicit none
+    real(rp), intent(  out) :: dt
     integer :: i, k, ii, kk, ll, ierr, i_end
     real(rp) :: x, z, r, u, w, t, hr, ht, nper
 
@@ -527,7 +529,7 @@ contains
     !Vertical direction isn't MPI-ized, so the rank's local values = the global values
     k_beg = 1
     nz = nz_glob
-    masterproc = (myrank == 0)
+    mainproc = (myrank == 0)
 
     !Allocate the model data
     allocate(state             (1-hs:nx+hs,1-hs:nz+hs,NUM_VARS))
@@ -550,8 +552,8 @@ contains
     etime = 0
     output_counter = 0
 
-    !If I'm the master process in MPI, display some grid information
-    if (masterproc) then
+    !If I'm the main process in MPI, display some grid information
+    if (mainproc) then
       write(*,*) 'nx_glob, nz_glob:', nx_glob, nz_glob
       write(*,*) 'dx,dz: ',dx,dz
       write(*,*) 'dt: ',dt
@@ -576,8 +578,7 @@ contains
             !Set the fluid state based on the user's specification
             if (data_spec_int == DATA_SPEC_COLLISION      ) call collision      (x,z,r,u,w,t,hr,ht)
             if (data_spec_int == DATA_SPEC_THERMAL        ) call thermal        (x,z,r,u,w,t,hr,ht)
-            if (data_spec_int == DATA_SPEC_MOUNTAIN       ) call mountain_waves (x,z,r,u,w,t,hr,ht)
-            if (data_spec_int == DATA_SPEC_TURBULENCE     ) call turbulence     (x,z,r,u,w,t,hr,ht)
+            if (data_spec_int == DATA_SPEC_GRAVITY_WAVES  ) call gravity_waves  (x,z,r,u,w,t,hr,ht)
             if (data_spec_int == DATA_SPEC_DENSITY_CURRENT) call density_current(x,z,r,u,w,t,hr,ht)
             if (data_spec_int == DATA_SPEC_INJECTION      ) call injection      (x,z,r,u,w,t,hr,ht)
 
@@ -602,8 +603,7 @@ contains
         !Set the fluid state based on the user's specification
         if (data_spec_int == DATA_SPEC_COLLISION      ) call collision      (0._rp,z,r,u,w,t,hr,ht)
         if (data_spec_int == DATA_SPEC_THERMAL        ) call thermal        (0._rp,z,r,u,w,t,hr,ht)
-        if (data_spec_int == DATA_SPEC_MOUNTAIN       ) call mountain_waves (0._rp,z,r,u,w,t,hr,ht)
-        if (data_spec_int == DATA_SPEC_TURBULENCE     ) call turbulence     (0._rp,z,r,u,w,t,hr,ht)
+        if (data_spec_int == DATA_SPEC_GRAVITY_WAVES  ) call gravity_waves  (0._rp,z,r,u,w,t,hr,ht)
         if (data_spec_int == DATA_SPEC_DENSITY_CURRENT) call density_current(0._rp,z,r,u,w,t,hr,ht)
         if (data_spec_int == DATA_SPEC_INJECTION      ) call injection      (0._rp,z,r,u,w,t,hr,ht)
         hy_dens_cell(k)       = hy_dens_cell(k)       + hr    * qweights(kk)
@@ -615,8 +615,7 @@ contains
       z = (k_beg-1 + k-1) * dz
       if (data_spec_int == DATA_SPEC_COLLISION      ) call collision      (0._rp,z,r,u,w,t,hr,ht)
       if (data_spec_int == DATA_SPEC_THERMAL        ) call thermal        (0._rp,z,r,u,w,t,hr,ht)
-      if (data_spec_int == DATA_SPEC_MOUNTAIN       ) call mountain_waves (0._rp,z,r,u,w,t,hr,ht)
-      if (data_spec_int == DATA_SPEC_TURBULENCE     ) call turbulence     (0._rp,z,r,u,w,t,hr,ht)
+      if (data_spec_int == DATA_SPEC_GRAVITY_WAVES  ) call gravity_waves  (0._rp,z,r,u,w,t,hr,ht)
       if (data_spec_int == DATA_SPEC_DENSITY_CURRENT) call density_current(0._rp,z,r,u,w,t,hr,ht)
       if (data_spec_int == DATA_SPEC_INJECTION      ) call injection      (0._rp,z,r,u,w,t,hr,ht)
       hy_dens_int      (k) = hr
@@ -653,22 +652,7 @@ contains
   end subroutine density_current
 
 
-  subroutine turbulence(x,z,r,u,w,t,hr,ht)
-    implicit none
-    real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
-    real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
-    real(rp), intent(  out) :: hr, ht      !Hydrostatic density and potential temperature
-    call hydro_const_theta(z,hr,ht)
-    r = 0
-    t = 0
-    call random_number(u)
-    call random_number(w)
-    u = (u-0.5)*20
-    w = (w-0.5)*20
-  end subroutine turbulence
-
-
-  subroutine mountain_waves(x,z,r,u,w,t,hr,ht)
+  subroutine gravity_waves(x,z,r,u,w,t,hr,ht)
     implicit none
     real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
     real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
@@ -678,7 +662,7 @@ contains
     t = 0
     u = 15
     w = 0
-  end subroutine mountain_waves
+  end subroutine gravity_waves
 
 
   !Rising thermal
@@ -801,8 +785,12 @@ contains
     !Temporary arrays to hold density, u-wind, w-wind, and potential temperature (theta)
     real(rp), allocatable :: dens(:,:), uwnd(:,:), wwnd(:,:), theta(:,:)
     real(rp) :: etimearr(1)
+
+    !$acc update host(state) async
+    !$acc wait
+
     !Inform the user
-    if (masterproc) write(*,*) '*** OUTPUT ***'
+    if (mainproc) write(*,*) '*** OUTPUT ***'
     !Allocate some (big) temp arrays
     allocate(dens (nx,nz))
     allocate(uwnd (nx,nz))
@@ -818,11 +806,19 @@ contains
       len=nx_glob       ; call ncwrap( nfmpi_def_dim( ncid , 'x' , len , x_dimid ) , __LINE__ )
       len=nz_glob       ; call ncwrap( nfmpi_def_dim( ncid , 'z' , len , z_dimid ) , __LINE__ )
       !Create the variables
+#ifdef SINGLE_PREC
+      call ncwrap( nfmpi_def_var( ncid , 't' , nf90_real , 1 , (/ t_dimid /) , t_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'dens'  , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  dens_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'uwnd'  , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  uwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'wwnd'  , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  wwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'theta' , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) , theta_varid ) , __LINE__ )
+#else
       call ncwrap( nfmpi_def_var( ncid , 't' , nf90_double , 1 , (/ t_dimid /) , t_varid ) , __LINE__ )
       call ncwrap( nfmpi_def_var( ncid , 'dens'  , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  dens_varid ) , __LINE__ )
       call ncwrap( nfmpi_def_var( ncid , 'uwnd'  , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  uwnd_varid ) , __LINE__ )
       call ncwrap( nfmpi_def_var( ncid , 'wwnd'  , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  wwnd_varid ) , __LINE__ )
       call ncwrap( nfmpi_def_var( ncid , 'theta' , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) , theta_varid ) , __LINE__ )
+#endif
       !End "define" mode
       call ncwrap( nfmpi_enddef( ncid ) , __LINE__ )
     else
@@ -847,17 +843,28 @@ contains
     enddo
 
     !Write the grid data to file with all the processes writing collectively
+#ifdef SINGLE_PREC
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid ,  dens_varid , st3 , ct3 , dens  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid ,  uwnd_varid , st3 , ct3 , uwnd  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid ,  wwnd_varid , st3 , ct3 , wwnd  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid , theta_varid , st3 , ct3 , theta ) , __LINE__ )
+#else
     st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid ,  dens_varid , st3 , ct3 , dens  ) , __LINE__ )
     st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid ,  uwnd_varid , st3 , ct3 , uwnd  ) , __LINE__ )
     st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid ,  wwnd_varid , st3 , ct3 , wwnd  ) , __LINE__ )
     st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid , theta_varid , st3 , ct3 , theta ) , __LINE__ )
+#endif
 
-    !Only the master process needs to write the elapsed time
+    !Only the main process needs to write the elapsed time
     !Begin "independent" write mode
     call ncwrap( nfmpi_begin_indep_data(ncid) , __LINE__ )
     !write elapsed time to file
-    if (masterproc) then
+    if (mainproc) then
+#ifdef SINGLE_PREC
+      st1=(/num_out+1/); ct1=(/1/); etimearr(1) = etime; call ncwrap( nfmpi_put_vara_real( ncid , t_varid , st1 , ct1 , etimearr ) , __LINE__ )
+#else
       st1=(/num_out+1/); ct1=(/1/); etimearr(1) = etime; call ncwrap( nfmpi_put_vara_double( ncid , t_varid , st1 , ct1 , etimearr ) , __LINE__ )
+#endif
     endif
     !End "independent" write mode
     call ncwrap( nfmpi_end_indep_data(ncid) , __LINE__ )
@@ -914,7 +921,7 @@ contains
         te   = te   + (ke + r*cv*t)*dx*dz ! Accumulate domain total energy
       enddo
     enddo
-    call mpi_allreduce((/mass,te/),glob,2,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,ierr)
+    call mpi_allreduce((/mass,te/),glob,2,mpi_type,MPI_SUM,MPI_COMM_WORLD,ierr)
     mass = glob(1)
     te   = glob(2)
   end subroutine reductions

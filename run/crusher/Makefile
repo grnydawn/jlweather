@@ -12,13 +12,12 @@ NZ := 100
 
 DATA_SPEC_COLLISION       := 1
 DATA_SPEC_THERMAL         := 2
-DATA_SPEC_MOUNTAIN        := 3
-DATA_SPEC_TURBULENCE      := 4
+DATA_SPEC_GRAVITY_WAVES   := 3
 DATA_SPEC_DENSITY_CURRENT := 5
 DATA_SPEC_INJECTION       := 6
 
 #DATA_SPEC := ${DATA_SPEC_COLLISION}
-DATA_SPEC := ${DATA_SPEC_THERMAL}
+DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
 OUT_FILE := /gpfs/alpine/cli133/proj-shared/grnydawn/temp/output.nc
 
@@ -28,7 +27,8 @@ SRCDIR :=../../src
 JAISRC := ${SRCDIR}/jai/miniWeather_accel.jl
 JLSRC := ${SRCDIR}/julia/miniWeather_mpi.jl
 FORTSRC := ${SRCDIR}/fortran/miniWeather_mpi.F90
-FORTACCSRC := ${SRCDIR}/fortran/miniWeather_openacc.F90
+FORTACCSRC := ${SRCDIR}/fortran/miniWeather_mpi_openacc.F90
+FORTOMPSRC := ${SRCDIR}/fortran/miniWeather_mpi_openmp45.F90
 MANUALJLSRC := ${SRCDIR}/manual/miniWeather_openacc.jl
 MANUALFORTSRC := ${SRCDIR}/manual/openacc_driver_${NX}x${NZ}.F90
 
@@ -58,6 +58,9 @@ fort: ${FORTSRC}
 
 fortacc: ${FORTACCSRC}
 	${FC} ${F_FLAGS} -h acc,noomp -o miniweather_fortacc.exe $<
+
+fortomp: ${FORTOMPSRC}
+	${FC} ${F_FLAGS} -h noacc,omp -o miniweather_fortomp.exe $<
 
 manual: ${MANUALFORTSRC}
 	ftn -shared -fPIC -h acc,noomp -o jopenacc.so $<

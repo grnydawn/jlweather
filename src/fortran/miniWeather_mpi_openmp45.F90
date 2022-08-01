@@ -55,6 +55,8 @@ program miniweather
   real(rp), parameter :: qpoints (nqpoints) = (/ 0.112701665379258311482073460022E0_rp , 0.500000000000000000000000000000E0_rp , 0.887298334620741688517926539980E0_rp /)
   real(rp), parameter :: qweights(nqpoints) = (/ 0.277777777777777777777777777779E0_rp , 0.444444444444444444444444444444E0_rp , 0.277777777777777777777777777779E0_rp /)
 
+  integer :: asyncid = 1
+
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !! BEGIN USER-CONFIGURABLE PARAMETERS
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -101,7 +103,7 @@ program miniweather
   real(rp), allocatable :: recvbuf_r(:,:,:)     !buffers for MPI data exchanges. Dimensions: (hs,nz,NUM_VARS)
   integer(8) :: t1, t2, rate                    !For CPU Timings
   real(rp) :: mass0, te0                        !Initial domain totals for mass and total energy  
-  real(rp) :: mass , te                         !Domain totals for mass and total energy  
+  real(rp) :: mass ,te                          !Domain totals for mass and total energy  
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !! THE MAIN PROGRAM STARTS HERE
@@ -109,6 +111,8 @@ program miniweather
 
   !Initialize MPI, allocate arrays, initialize the grid and the data
   call init(dt)
+
+  !$omp target data map(to:state_tmp,hy_dens_cell,hy_dens_theta_cell,hy_dens_int,hy_dens_theta_int,hy_pressure_int) map(alloc:flux,tend,sendbuf_l,sendbuf_r,recvbuf_l,recvbuf_r) map(tofrom:state)
 
   !Initial reductions for mass, kinetic energy, and total energy
   call reductions(mass0,te0)
@@ -119,6 +123,7 @@ program miniweather
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !! MAIN TIME STEP LOOP
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !$omp taskwait
   if (mainproc) call system_clock(t1)
   do while (etime < sim_time)
     !If the time step leads to exceeding the simulation time, shorten it for the last step
@@ -138,6 +143,7 @@ program miniweather
       call output(state,etime)
     endif
   enddo
+  !$omp taskwait
   if (mainproc) then
     call system_clock(t2,rate)
     write(*,*) "CPU Time: ",dble(t2-t1)/dble(rate)
@@ -145,6 +151,8 @@ program miniweather
 
   !Final reductions for mass, kinetic energy, and total energy
   call reductions(mass,te)
+
+  !$omp end target data
 
   if (mainproc) then
     write(*,*) "d_mass: ", (mass - mass0)/mass0
@@ -203,7 +211,7 @@ contains
   !Perform a single semi-discretized step in time with the form:
   !state_out = state_init + dt * rhs(state_forcing)
   !Meaning the step starts from state_init, computes the rhs using state_forcing, and stores the result in state_out
-  subroutine semi_discrete_step( state_init , state_forcing , state_out , dt , dir , flux , tend )
+  subroutine semi_discrete_step( state_init , state_forcing , state_out , dt , dir , flux , tend)
     implicit none
     real(rp), intent(in   ) :: state_init   (1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
     real(rp), intent(inout) :: state_forcing(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
@@ -227,10 +235,8 @@ contains
       call compute_tendencies_z(state_forcing,flux,tend,dt)
     endif
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Apply the tendencies to the fluid state
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -276,11 +282,10 @@ contains
     real(rp) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
     !Compute the hyperviscosity coeficient
     hv_coef = -hv_beta * dx / (16*dt)
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Compute fluxes in the x-direction for each cell
+    !$omp target teams distribute parallel do simd collapse(2) private(stencil,vals,d3_vals) depend(inout:asyncid) nowait
     do k = 1 , nz
+
       do i = 1 , nx+1
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
         do ll = 1 , NUM_VARS
@@ -308,10 +313,8 @@ contains
       enddo
     enddo
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Use the fluxes to compute tendencies for each cell
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -336,11 +339,10 @@ contains
     real(rp) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
     !Compute the hyperviscosity coeficient
     hv_coef = -hv_beta * dz / (16*dt)
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Compute fluxes in the x-direction for each cell
+    !$omp target teams distribute parallel do simd collapse(2) private(stencil,vals,d3_vals) depend(inout:asyncid) nowait
     do k = 1 , nz+1
+
       do i = 1 , nx
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
         do ll = 1 , NUM_VARS
@@ -373,10 +375,8 @@ contains
       enddo
     enddo
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Use the fluxes to compute tendencies for each cell
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -398,6 +398,7 @@ contains
     real(rp) :: z
 
     if (nranks == 1) then
+      !$omp target teams distribute parallel do simd collapse(2)  depend(inout:asyncid) nowait
       do ll = 1 , NUM_VARS
         do k = 1 , nz
           state(-1  ,k,ll) = state(nx-1,k,ll)
@@ -414,6 +415,7 @@ contains
     call mpi_irecv(recvbuf_r,hs*nz*NUM_VARS,mpi_type,right_rank,1,MPI_COMM_WORLD,req_r(2),ierr)
 
     !Pack the send buffers
+    !$omp target teams distribute parallel do simd collapse(3)  depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do s = 1 , hs
@@ -423,6 +425,9 @@ contains
       enddo
     enddo
 
+    !$omp target update from(sendbuf_l,sendbuf_r) depend(inout:asyncid) nowait
+    !$omp taskwait
+
     !Fire off the sends
     call mpi_isend(sendbuf_l,hs*nz*NUM_VARS,mpi_type, left_rank,1,MPI_COMM_WORLD,req_s(1),ierr)
     call mpi_isend(sendbuf_r,hs*nz*NUM_VARS,mpi_type,right_rank,0,MPI_COMM_WORLD,req_s(2),ierr)
@@ -430,7 +435,10 @@ contains
     !Wait for receives to finish
     call mpi_waitall(2,req_r,status,ierr)
 
+    !$omp target update to(recvbuf_l,recvbuf_r) depend(inout:asyncid) nowait
+
     !Unpack the receive buffers
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do s = 1 , hs
@@ -445,9 +453,7 @@ contains
 
     if (data_spec_int == DATA_SPEC_INJECTION) then
       if (myrank == 0) then
-        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        !! TODO: THREAD ME
-        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        !$omp target teams distribute parallel do simd depend(inout:asyncid) nowait
         do k = 1 , nz
           z = (k_beg-1 + k-0.5_rp)*dz
           if (abs(z-3*zlen/4) <= zlen/16) then
@@ -466,11 +472,7 @@ contains
     implicit none
     real(rp), intent(inout) :: state(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
     integer :: i, ll
-    real(rp), parameter :: mnt_width = xlen/8
-    real(rp) :: x, xloc, mnt_deriv, nz_mnt
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !$omp target teams distribute parallel do simd collapse(2) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do i = 1-hs,nx+hs
         if (ll == ID_WMOM) then
@@ -776,7 +778,6 @@ contains
   !If it's too cumbersome, you can comment the I/O out, but you'll miss out on some potentially cool graphics
   subroutine output(state,etime)
     use pnetcdf
-    use mpi
     implicit none
     real(rp), intent(in) :: state(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
     real(rp), intent(in) :: etime
@@ -787,6 +788,10 @@ contains
     !Temporary arrays to hold density, u-wind, w-wind, and potential temperature (theta)
     real(rp), allocatable :: dens(:,:), uwnd(:,:), wwnd(:,:), theta(:,:)
     real(rp) :: etimearr(1)
+
+    !$omp target update from(state) depend(inout:asyncid) nowait
+    !$omp taskwait
+
     !Inform the user
     if (mainproc) write(*,*) '*** OUTPUT ***'
     !Allocate some (big) temp arrays
@@ -798,9 +803,9 @@ contains
     !If the elapsed time is zero, create the file. Otherwise, open the file
     if (etime == 0) then
       !Create the file
-      call ncwrap( nf90mpi_create( MPI_COMM_WORLD , 'output.nc' , nf90_clobber , MPI_INFO_NULL , ncid ) , __LINE__ )
+      call ncwrap( nfmpi_create( MPI_COMM_WORLD , 'output.nc' , nf_clobber , MPI_INFO_NULL , ncid ) , __LINE__ )
       !Create the dimensions
-      len=nf90_unlimited; call ncwrap( nfmpi_def_dim( ncid , 't' , len , t_dimid ) , __LINE__ )
+      len=nf_unlimited; call ncwrap( nfmpi_def_dim( ncid , 't' , len , t_dimid ) , __LINE__ )
       len=nx_glob       ; call ncwrap( nfmpi_def_dim( ncid , 'x' , len , x_dimid ) , __LINE__ )
       len=nz_glob       ; call ncwrap( nfmpi_def_dim( ncid , 'z' , len , z_dimid ) , __LINE__ )
       !Create the variables
@@ -821,7 +826,7 @@ contains
       call ncwrap( nfmpi_enddef( ncid ) , __LINE__ )
     else
       !Open the file
-      call ncwrap( nfmpi_open( MPI_COMM_WORLD , 'output.nc' , nf90_write , MPI_INFO_NULL , ncid ) , __LINE__ )
+      call ncwrap( nfmpi_open( MPI_COMM_WORLD , 'output.nc' , nf_write , MPI_INFO_NULL , ncid ) , __LINE__ )
       !Get the variable IDs
       call ncwrap( nfmpi_inq_varid( ncid , 'dens'  ,  dens_varid ) , __LINE__ )
       call ncwrap( nfmpi_inq_varid( ncid , 'uwnd'  ,  uwnd_varid ) , __LINE__ )
@@ -868,7 +873,7 @@ contains
     call ncwrap( nfmpi_end_indep_data(ncid) , __LINE__ )
 
     !Close the file
-    call ncwrap( nf90mpi_close(ncid) , __LINE__ )
+    call ncwrap( nfmpi_close(ncid) , __LINE__ )
 
     !Increment the number of outputs
     num_out = num_out + 1
@@ -889,7 +894,7 @@ contains
     integer, intent(in) :: line
     if (ierr /= nf_noerr) then
       write(*,*) 'NetCDF Error at line: ', line
-      write(*,*) nf90mpi_strerror(ierr)
+      write(*,*) nfmpi_strerror(ierr)
       stop
     endif
   end subroutine ncwrap
@@ -904,7 +909,7 @@ contains
     real(rp) :: glob(2)
     mass = 0
     te   = 0
-    !$acc parallel loop collapse(2) reduction(+:mass,te)
+    !$omp target teams distribute parallel do simd collapse(2) reduction(+:mass,te)
     do k = 1 , nz
       do i = 1 , nx
         r  =   state(i,k,ID_DENS) + hy_dens_cell(k)             ! Density

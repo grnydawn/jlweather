@@ -1,0 +1,3 @@
+Copied from commit fe47f84cd10a41635f5ef2f8611aa1a2abea6457 of main branch in git@github.com:mrnorman/miniWeather.git
+
+netcdf should be available.

@@ -96,6 +96,7 @@ const DX          = XLEN / NX_GLOB
 const DZ          = ZLEN / NZ_GLOB
 const DT          = min(DX,DZ) / MAX_SPEED * CFL
 const NQPOINTS    = 3
+const PI          = Float64(3.14159265358979323846264338327)
 const GRAV        = Float64(9.8)
 const CP          = Float64(1004.0) # Specific heat of dry air at constant pressure
 const CV          = Float64(717.0)  # Specific heat of dry air at constant volume
@@ -114,8 +115,7 @@ const DIR_Z       = 2 #Integer constant to express that this operation is in the
 
 const DATA_SPEC_COLLISION       = 1
 const DATA_SPEC_THERMAL         = 2
-const DATA_SPEC_MOUNTAIN        = 3
-const DATA_SPEC_TURBULENCE      = 4
+const DATA_SPEC_GRAVITY_WAVES   = 3
 const DATA_SPEC_DENSITY_CURRENT = 5
 const DATA_SPEC_INJECTION       = 6
 
@@ -251,8 +251,7 @@ function init!()
             r, u, w, t, hr, ht = @match DATA_SPEC begin
                 DATA_SPEC_COLLISION       => collision!(x,z)
                 DATA_SPEC_THERMAL         => thermal!(x,z)
-                DATA_SPEC_MOUNTAIN        => mountain_waves!(x,z)
-                DATA_SPEC_TURBULENCE      => turbulence!(x,z)
+                DATA_SPEC_GRAVITY_WAVES   => gravity_waves!(x,z)
                 DATA_SPEC_DENSITY_CURRENT => density_current!(x,z)
                 DATA_SPEC_INJECTION       => injection!(x,z)
             end
@@ -278,8 +277,7 @@ function init!()
             r, u, w, t, hr, ht = @match DATA_SPEC begin
                 DATA_SPEC_COLLISION       => collision!(0.0,z)
                 DATA_SPEC_THERMAL         => thermal!(0.0,z)
-                DATA_SPEC_MOUNTAIN        => mountain_waves!(0.0,z)
-                DATA_SPEC_TURBULENCE      => turbulence!(0.0,z)
+                DATA_SPEC_GRAVITY_WAVES   => gravity_waves!(0.0,z)
                 DATA_SPEC_DENSITY_CURRENT => density_current!(0.0,z)
                 DATA_SPEC_INJECTION       => injection!(0.0,z)
             end           
@@ -296,8 +294,7 @@ function init!()
         r, u, w, t, hr, ht = @match DATA_SPEC begin
             DATA_SPEC_COLLISION       => collision!(0.0,z)
             DATA_SPEC_THERMAL         => thermal!(0.0,z)
-            DATA_SPEC_MOUNTAIN        => mountain_waves!(0.0,z)
-            DATA_SPEC_TURBULENCE      => turbulence!(0.0,z)
+            DATA_SPEC_GRAVITY_WAVES   => gravity_waves!(0.0,z)
             DATA_SPEC_DENSITY_CURRENT => density_current!(0.0,z)
             DATA_SPEC_INJECTION       => injection!(0.0,z)
         end                  
@@ -340,31 +337,19 @@ function density_current!(x::Float64, z::Float64)
     return r, u, w, t, hr, ht
 end
 
-function turbulence!(x::Float64, z::Float64)
+function gravity_waves!(x::Float64, z::Float64)
 
     #Hydrostatic density and potential temperature
-    hr,ht = hydro_const_theta!(z)
+    hr,ht = hydro_const_bvfreq!(z, Float64(0.02))
 
     r  = Float64(0.0) # Density
     t  = Float64(0.0) # Potential temperature
-    u  = Float64(0.0) # Uwind
+    u  = Float64(15.0) # Uwind
     w  = Float64(0.0) # Wwind
     
     return r, u, w, t, hr, ht
 end
 
-function mountain_waves!(x::Float64, z::Float64)
-
-    #Hydrostatic density and potential temperature
-    hr,ht = hydro_const_theta!(z)
-
-    r  = Float64(0.0) # Density
-    t  = Float64(0.0) # Potential temperature
-    u  = Float64(0.0) # Uwind
-    w  = Float64(0.0) # Wwind
-    
-    return r, u, w, t, hr, ht
-end
 
 #Rising thermal
 function thermal!(x::Float64, z::Float64)
@@ -417,16 +402,34 @@ function hydro_const_theta!(z::Float64)
     return r, t
 end
 
+function hydro_const_bvfreq!(z::Float64, bv_freq0::Float64)
+
+    r      = Float64(0.0) # Density
+    t      = Float64(0.0) # Potential temperature
+
+    theta0 = Float64(300.0) # Background potential temperature
+    exner0 = Float64(1.0)   # Surface-level Exner pressure
+
+    t      = theta0 * exp(bv_freq0^Float64(2.0) / GRAV * z) # Potential temperature at z
+    exner  = exner0 - GRAV^Float64(2.0) / (CP * bv_freq0^Float64(2.0)) * (t - theta0) / (t * theta0) # Exner pressure at z
+    p      = P0 * exner^(CP/RD)                # Pressure at z
+    rt     = (p / C0)^(Float64(1.0)/GAMMA)     # rho*theta at z
+    r      = rt / t                            # Density at z
+
+    return r, t
+end
+
+
 #Sample from an ellipse of a specified center, radius, and amplitude at a specified location
 function sample_ellipse_cosine!(   x::Float64,    z::Float64, amp::Float64, 
                                   x0::Float64,   z0::Float64, 
                                 xrad::Float64, zrad::Float64 )
 
     #Compute distance from bubble center
-    local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * pi / Float64(2.0)
+    local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * PI / Float64(2.0)
  
     #If the distance from bubble center is less than the radius, create a cos**2 profile
-    if (dist <= pi / Float64(2.0) ) 
+    if (dist <= PI / Float64(2.0) ) 
       val = amp * cos(dist)^2
     else
       val = Float64(0.0)
@@ -563,6 +566,28 @@ function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3
     for ll in 1:NUM_VARS
         for k in 1:NZ
             for i in 1:NX
+                if DATA_SPEC == DATA_SPEC_GRAVITY_WAVES
+                    x = (I_BEG-1 + i-Float64(0.5)) * DX
+                    z = (K_BEG-1 + k-Float64(0.5)) * DZ
+                    # The following requires "acc routine" in OpenACC and "declare target" in OpenMP offload
+                    # Neither of these are particularly well supported by compilers, so I'm manually inlining
+                    # wpert = sample_ellipse_cosine( x,z , 0.01_rp , xlen/8,1000._rp, 500._rp,500._rp )
+                    x0 = XLEN/Float64(8.)
+                    z0 = Float64(1000.0)
+                    xrad = Float64(500.)
+                    zrad = Float64(500.)
+                    amp = Float64(0.01)
+                    #Compute distance from bubble center
+                    dist = sqrt( ((x-x0)/xrad)^Float64(2.0) + ((z-z0)/zrad)^Float64(2.0) ) * PI / Float64(2.0)
+                    #If the distance from bubble center is less than the radius, create a cos**2 profile
+                    if dist <= PI / Float64(2.0)
+                        wpert = amp * cos(dist)^Float64(2.0)
+                    else
+                        wpert = Float64(0.0)
+                    end
+                    tend[i,k,ID_WMOM] = tend[i,k,ID_WMOM] + wpert*hy_dens_cell[k]
+                end
+
                 stateout[i,k,ll] = stateinit[i,k,ll] + dt * tend[i,k,ll]
             end
         end
@@ -579,6 +604,18 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
+
+    if NRANKS == 1
+        for ll in 1:NUM_VARS
+            for k in 1:NZ
+                state[-1  ,k,ll] = state[NX-1,k,ll]
+                state[0   ,k,ll] = state[NX  ,k,ll]
+                state[NX+1,k,ll] = state[1   ,k,ll]
+                state[NX+2,k,ll] = state[2   ,k,ll]
+            end
+        end
+        return
+    end
 
     local req_r = Vector{MPI.Request}(undef, 2)
     local req_s = Vector{MPI.Request}(undef, 2)

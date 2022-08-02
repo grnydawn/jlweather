@@ -13,9 +13,6 @@ import NCDatasets.Dataset,
        NCDatasets.defDim,
        NCDatasets.defVar
 
-
-import Match.@match
-
 import MPI.Init,
        MPI.COMM_WORLD,
        MPI.Comm_rank,
@@ -83,6 +80,7 @@ s = ArgParseSettings()
         default = 400.0
     "--dataspec", "-d"
         help = "data spec"
+        arg_type = Int64
         default = 2
     "--outfile", "-o"
         help = "output file path"
@@ -307,14 +305,11 @@ function init!()
             z = (K_BEG-1 + k-0.5) * DZ + (qpoints[kk]-0.5)*DZ
 
             #Set the fluid state based on the user's specification
-            r, u, w, t, hr, ht = @match DATA_SPEC begin
-                DATA_SPEC_COLLISION       => collision!(x,z)
-                DATA_SPEC_THERMAL         => thermal!(x,z)
-                DATA_SPEC_MOUNTAIN        => mountain_waves!(x,z)
-                DATA_SPEC_TURBULENCE      => turbulence!(x,z)
-                DATA_SPEC_DENSITY_CURRENT => density_current!(x,z)
-                DATA_SPEC_INJECTION       => injection!(x,z)
-            end
+            if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(x,z)      ; end
+            if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(x,z)        ; end
+            if(DATA_SPEC==DATA_SPEC_GRAVITY_WAVES)  ; r,u,w,t,hr,ht = gravity_waves!(x,z)  ; end
+            if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(x,z); end
+            if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(x,z)      ; end
 
             #Store into the fluid state array
             state[i,k,ID_DENS] = state[i,k,ID_DENS] + r                         * qweights[ii]*qweights[kk]
@@ -334,14 +329,11 @@ function init!()
             z = (K_BEG-1 + k-0.5) * DZ + (qpoints[kk]-0.5)*DZ
             
             #Set the fluid state based on the user's specification
-            r, u, w, t, hr, ht = @match DATA_SPEC begin
-                DATA_SPEC_COLLISION       => collision!(0.0,z)
-                DATA_SPEC_THERMAL         => thermal!(0.0,z)
-                DATA_SPEC_MOUNTAIN        => mountain_waves!(0.0,z)
-                DATA_SPEC_TURBULENCE      => turbulence!(0.0,z)
-                DATA_SPEC_DENSITY_CURRENT => density_current!(0.0,z)
-                DATA_SPEC_INJECTION       => injection!(0.0,z)
-            end           
+            if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(0.0,z)      ; end
+            if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(0.0,z)        ; end
+            if(DATA_SPEC==DATA_SPEC_GRAVITY_WAVES)  ; r,u,w,t,hr,ht = gravity_waves!(0.0,z)  ; end
+            if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(0.0,z); end
+            if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(0.0,z)      ; end
 
             hy_dens_cell[k]       = hy_dens_cell[k]       + hr    * qweights[kk]
             hy_dens_theta_cell[k] = hy_dens_theta_cell[k] + hr*ht * qweights[kk]
@@ -352,18 +344,15 @@ function init!()
     for k in 1:NZ+1
         z = (K_BEG-1 + k-1) * DZ
         #Set the fluid state based on the user's specification
-        r, u, w, t, hr, ht = @match DATA_SPEC begin
-            DATA_SPEC_COLLISION       => collision!(0.0,z)
-            DATA_SPEC_THERMAL         => thermal!(0.0,z)
-            DATA_SPEC_MOUNTAIN        => mountain_waves!(0.0,z)
-            DATA_SPEC_TURBULENCE      => turbulence!(0.0,z)
-            DATA_SPEC_DENSITY_CURRENT => density_current!(0.0,z)
-            DATA_SPEC_INJECTION       => injection!(0.0,z)
-        end                  
+        if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(0.0,z)      ; end
+        if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(0.0,z)        ; end
+        if(DATA_SPEC==DATA_SPEC_GRAVITY_WAVES)  ; r,u,w,t,hr,ht = gravity_waves!(0.0,z)  ; end
+        if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(0.0,z); end
+        if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(0.0,z)      ; end
 
-      hy_dens_int[k] = hr
-      hy_dens_theta_int[k] = hr*ht
-      hy_pressure_int[k] = C0*(hr*ht)^GAMMA
+        hy_dens_int[k] = hr
+        hy_dens_theta_int[k] = hr*ht
+        hy_pressure_int[k] = C0*(hr*ht)^GAMMA
     end
     
     return (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,

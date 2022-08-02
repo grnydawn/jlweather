@@ -191,8 +191,8 @@ function main(args::Vector{String})
     
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
-        @printf("d_mass: %f\n", (mass - mass0)/mass0)
-        @printf("d_te:   %f\n", (te - te0)/te0)
+        @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
+        @printf("d_te  : %.15e\n", (te - te0)/te0)
     end
         
     finalize!(state)

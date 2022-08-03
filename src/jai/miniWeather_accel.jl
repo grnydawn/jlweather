@@ -193,16 +193,18 @@ function main(args::Vector{String})
 
 	# NOTE: add filename and line # to generate hash of jai functions
 
-	@jenterdata myaccel update(hy_dens_cell, hy_dens_theta_cell,
+	@jenterdata myaccel update(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
 
     #Initial reductions for mass, kinetic energy, and total energy
-    local mass0, te0 = reductions_accel(state, hy_dens_cell, hy_dens_theta_cell)
+    local mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
     #Output the initial state
     output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
 
+
+    @jwait myaccel
     
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
@@ -242,7 +244,7 @@ function main(args::Vector{String})
 	    #Profile.print()
     end
 
-    local mass, te = reductions_accel(state, hy_dens_cell, hy_dens_theta_cell)
+    local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
  	@jexitdata myaccel deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
 			hy_dens_int, hy_dens_theta_int, hy_pressure_int)
@@ -614,6 +616,8 @@ function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3
         
     end
   
+    @jexitdata myaccel update(tend)
+
     #Apply the tendencies to the fluid state
     for ll in 1:NUM_VARS
         for k in 1:NZ
@@ -782,7 +786,7 @@ function compute_tendencies_z_accel!(state::OffsetArray{Float64, 3, Array{Float6
 
 end
 
-function reductions_accel(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
@@ -790,7 +794,7 @@ function reductions_accel(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     local te = zero(Float64)
     glob = Array{Float64}(undef, 2)
 
-	@jenterdata myaccel update(state)
+	#@jenterdata myaccel update(state)
 
     @jlaunch(reduce_kernel, state, hy_dens_cell, hy_dens_theta_cell; output=(glob,))
 

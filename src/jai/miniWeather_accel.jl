@@ -35,13 +35,11 @@ import Libdl
 ##############
 
 const COMPILE_FOPENACC_CRAY = "ftn -shared -fPIC -h acc,noomp"
-#const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
-const COMPILE = COMPILE_FOPENACC_CRAY
-#const COMPILE = COMPILE_FORTRAN
+const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
 
 const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl") 
-const PATH_APPLY_SAME_KERNEL = joinpath(@__DIR__, "apply_same.knl") 
-const PATH_APPLY_DIFF_KERNEL = joinpath(@__DIR__, "apply_diff.knl") 
+const PATH_TEND_APPLY_SAME_KERNEL = joinpath(@__DIR__, "tend_apply_same.knl") 
+const PATH_TEND_APPLY_DIFF_KERNEL = joinpath(@__DIR__, "tend_apply_diff.knl") 
 const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl") 
 const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl") 
 
@@ -85,6 +83,16 @@ s = ArgParseSettings()
     "--outfile", "-o"
         help = "output file path"
         default = "output.nc"
+    "--workdir", "-w"
+        help = "working directory path"
+        default = ".jaitmp"
+    "--accel", "-a"
+        help = "accelerator type(fortran, cpp, fortran_openacc, fortran_omptarget)"
+        default = "fortran"
+    "--debugdir", "-b"
+        help = "debugging output directory path"
+        default = ".jaitmp"
+
 end
 
 parsed_args = parse_args(ARGS, s)
@@ -95,6 +103,17 @@ const NZ_GLOB     = parsed_args["nz"]
 const OUT_FREQ    = parsed_args["outfreq"]
 const DATA_SPEC   = parsed_args["dataspec"]
 const OUTFILE     = parsed_args["outfile"]
+const WORKDIR     = parsed_args["workdir"]
+const DEBUGDIR    = parsed_args["debugdir"]
+const ACCEL       = parsed_args["accel"]
+
+if ACCEL == "fortran"
+    const COMPILE = COMPILE_FORTRAN
+
+elseif ACCEL == "fortran_openacc"
+    const COMPILE = COMPILE_FOPENACC_CRAY
+
+end
 
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
@@ -174,14 +193,17 @@ function main(args::Vector{String})
     local nt = Int(1)
 
 
-    @jaccel myaccel framework(fortran_openacc) constant(NX, NZ, DX, DZ, HS,
+    @jaccel myaccel framework(ACCEL) constant(NX, NZ, DX, DZ, HS,
                 NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV, RD, CP, CV, ID_DENS,
-                ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE) compile(COMPILE) set(
-                master=MASTERPROC, debugdir=".jaitmp")
+                ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE, DATA_SPEC, PI, I_BEG,
+                K_BEG, XLEN, DATA_SPEC_GRAVITY_WAVES,) compile(COMPILE) set(
+                master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR)
 
     @jkernel reduce_kernel myaccel PATH_REDUCTION_KERNEL
     @jkernel tend_x_kernel myaccel PATH_TEND_X_KERNEL
     @jkernel tend_z_kernel myaccel PATH_TEND_Z_KERNEL
+    @jkernel tend_apply_same_kernel myaccel PATH_TEND_APPLY_SAME_KERNEL
+    @jkernel tend_apply_diff_kernel myaccel PATH_TEND_APPLY_DIFF_KERNEL
 
     #Initialize the grid and the data  
     (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
@@ -190,8 +212,6 @@ function main(args::Vector{String})
 
 	@jenterdata myaccel allocate(state, statetmp, flux, tend, hy_dens_cell,
             hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
-	# NOTE: add filename and line # to generate hash of jai functions
 
 	@jenterdata myaccel update(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
@@ -216,12 +236,12 @@ function main(args::Vector{String})
 
         #Perform a single time step
         if MASTERPROC
-            #Profile.@profile timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-            timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+            #Profile.@profile perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+            perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
                       sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
                       hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         else
-            timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+            perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
                       sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
                       hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         end
@@ -500,7 +520,7 @@ end
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-function timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+function perform_timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                    statetmp::OffsetArray{Float64, 3, Array{Float64, 3}},
                    flux::Array{Float64, 3},
                    tend::Array{Float64, 3},
@@ -580,9 +600,9 @@ end
 #Perform a single semi-discretized step in time with the form:
 #state_out = state_init + dt * rhs(state_forcing)
 #Meaning the step starts from state_init, computes the rhs using state_forcing, and stores the result in state_out
-function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    stateforcing::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    stateout::OffsetArray{Float64, 3, Array{Float64, 3}},
+function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_forcing::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_out::OffsetArray{Float64, 3, Array{Float64, 3}},
                     dt::Float64,
                     dir::Int,
                     flux::Array{Float64, 3},
@@ -599,56 +619,65 @@ function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
-        set_halo_values_x!(stateforcing, recvbuf_l, recvbuf_r, sendbuf_l,
+        set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
                            sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
         #Compute the time tendencies for the fluid state in the x-direction
-        compute_tendencies_x!(stateforcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
+        compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
 
         
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
-        set_halo_values_z!(stateforcing, hy_dens_cell, hy_dens_theta_cell)
+        set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
         
         #Compute the time tendencies for the fluid state in the z-direction
-        compute_tendencies_z_accel!(stateforcing,flux,tend,dt,
+        compute_tendencies_z_accel!(state_forcing,flux,tend,dt,
                     hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
   
-    @jexitdata myaccel update(tend)
+    @jenterdata myaccel update(tend, state_init, state_out)
 
-    #Apply the tendencies to the fluid state
-    for ll in 1:NUM_VARS
-        for k in 1:NZ
-            for i in 1:NX
-                if DATA_SPEC == DATA_SPEC_GRAVITY_WAVES
-                    x = (I_BEG-1 + i-Float64(0.5)) * DX
-                    z = (K_BEG-1 + k-Float64(0.5)) * DZ
-                    # The following requires "acc routine" in OpenACC and "declare target" in OpenMP offload
-                    # Neither of these are particularly well supported by compilers, so I'm manually inlining
-                    # wpert = sample_ellipse_cosine( x,z , 0.01_rp , xlen/8,1000._rp, 500._rp,500._rp )
-                    x0 = XLEN/Float64(8.)
-                    z0 = Float64(1000.0)
-                    xrad = Float64(500.)
-                    zrad = Float64(500.)
-                    amp = Float64(0.01)
-                    #Compute distance from bubble center
-                    dist = sqrt( ((x-x0)/xrad)^Float64(2.0) + ((z-z0)/zrad)^Float64(2.0) ) * PI / Float64(2.0)
-                    #If the distance from bubble center is less than the radius, create a cos**2 profile
-                    if dist <= PI / Float64(2.0)
-                        wpert = amp * cos(dist)^Float64(2.0)
-                    else
-                        wpert = Float64(0.0)
-                    end
-                    tend[i,k,ID_WMOM] = tend[i,k,ID_WMOM] + wpert*hy_dens_cell[k]
-                end
+    if pointer(state_init) == pointer(state_out)
+        @jlaunch(tend_apply_same_kernel, state_out, tend, hy_dens_cell, dt; output=(state_out, tend))
 
-
-                stateout[i,k,ll] = stateinit[i,k,ll] + dt * tend[i,k,ll]
-            end
-        end
+    else
+        @jlaunch(tend_apply_diff_kernel, state_init, tend, hy_dens_cell, dt; output=(state_out, tend))
     end
+
+    @jexitdata myaccel update(state_out, tend)
+
+#    #Apply the tendencies to the fluid state
+#    for ll in 1:NUM_VARS
+#        for k in 1:NZ
+#            for i in 1:NX
+#                if DATA_SPEC == DATA_SPEC_GRAVITY_WAVES
+#                    x = (I_BEG-1 + i-Float64(0.5)) * DX
+#                    z = (K_BEG-1 + k-Float64(0.5)) * DZ
+#                    # The following requires "acc routine" in OpenACC and "declare target" in OpenMP offload
+#                    # Neither of these are particularly well supported by compilers, so I'm manually inlining
+#                    # wpert = sample_ellipse_cosine( x,z , 0.01_rp , xlen/8,1000._rp, 500._rp,500._rp )
+#                    x0 = XLEN/Float64(8.)
+#                    z0 = Float64(1000.0)
+#                    xrad = Float64(500.)
+#                    zrad = Float64(500.)
+#                    amp = Float64(0.01)
+#                    #Compute distance from bubble center
+#                    dist = sqrt( ((x-x0)/xrad)^Float64(2.0) + ((z-z0)/zrad)^Float64(2.0) ) * PI / Float64(2.0)
+#                    #If the distance from bubble center is less than the radius, create a cos**2 profile
+#                    if dist <= PI / Float64(2.0)
+#                        wpert = amp * cos(dist)^Float64(2.0)
+#                    else
+#                        wpert = Float64(0.0)
+#                    end
+#                    tend[i,k,ID_WMOM] = tend[i,k,ID_WMOM] + wpert*hy_dens_cell[k]
+#                end
+#
+#
+#                state_out[i,k,ll] = state_init[i,k,ll] + dt * tend[i,k,ll]
+#            end
+#        end
+#    end
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI
@@ -812,6 +841,8 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                 nt::Int,
                 hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                 hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
+
+    @jexitdata myaccel update(state)
 
     var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 

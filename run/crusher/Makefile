@@ -19,7 +19,10 @@ DATA_SPEC_INJECTION       := 6
 #DATA_SPEC := ${DATA_SPEC_COLLISION}
 DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
-OUT_FILE := /gpfs/alpine/cli133/proj-shared/grnydawn/temp/output.nc
+ACCEL_TYPE := fortran_openacc
+WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp
+DEBUG_DIR := ${WORK_DIR}
+OUT_FILE  := ${WORK_DIR}/output.nc
 
 JULIA := julia --project=.
 
@@ -32,7 +35,9 @@ FORTOMPSRC := ${SRCDIR}/fortran/miniWeather_mpi_openmp45.F90
 MANUALJLSRC := ${SRCDIR}/manual/miniWeather_openacc.jl
 MANUALFORTSRC := ${SRCDIR}/manual/openacc_driver_${NX}x${NZ}.F90
 
-ARGS := -s ${SIM_TIME} -x ${NX} -z ${NZ} -f ${OUT_FREQ} -d ${DATA_SPEC} -o ${OUT_FILE}
+ARGS := -s ${SIM_TIME} -x ${NX} -z ${NZ} -f ${OUT_FREQ} \
+		-d ${DATA_SPEC} -o ${OUT_FILE} -w ${WORK_DIR} \
+		-a ${ACCEL_TYPE} -b ${DEBUG_DIR}
 
 CC := cc
 CXX := CC

@@ -11,7 +11,7 @@
     !Compute fluxes in the x-direction for each cell
 
 	!$acc parallel loop collapse(2) private(stencil,vals,d3_vals) &
-    !$acc& present(state, hy_dens_cell, hy_dens_theta_cell, flux)
+    !$acc& present(state, hy_dens_cell, hy_dens_theta_cell, flux) async
     do k = 1 , nz
       do i = 1 , nx+1
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
@@ -44,7 +44,7 @@
     !! TODO: THREAD ME
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Use the fluxes to compute tendencies for each cell
-	!$acc parallel loop collapse(3) present(flux, tend)
+	!$acc parallel loop collapse(3) present(flux, tend) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx

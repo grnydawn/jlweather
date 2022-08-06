@@ -7,7 +7,9 @@ import ArgParse.ArgParseSettings,
        ArgParse.parse_args,
        ArgParse.@add_arg_table!
 
-import NCDatasets: Dataset
+import NCDatasets.Dataset,
+       NCDatasets.defDim,
+       NCDatasets.defVar
 
 import MPI.Init,
        MPI.COMM_WORLD,
@@ -72,6 +74,16 @@ s = ArgParseSettings()
         help = "data spec"
         arg_type = Int64
         default = 2
+    "--outfile", "-o"
+        help = "output file path"
+        default = "output.nc"
+    "--workdir", "-w"
+        help = "working directory path"
+        default = ".jaitmp"
+    "--debugdir", "-b"
+        help = "debugging output directory path"
+        default = ".jaitmp"
+
 end
 
 parsed_args = parse_args(ARGS, s)
@@ -81,7 +93,10 @@ const NX_GLOB     = parsed_args["nx"]
 const NZ_GLOB     = parsed_args["nz"]
 const OUT_FREQ    = parsed_args["outfreq"]
 const DATA_SPEC   = parsed_args["dataspec"]
-    
+const OUTFILE     = parsed_args["outfile"]
+const WORKDIR     = parsed_args["workdir"]
+const DEBUGDIR    = parsed_args["debugdir"]
+
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
 const I_END = trunc(Int, round(NPER*(MYRANK+1)))
@@ -93,7 +108,8 @@ const RIGHT_RANK = MYRANK+1 == NRANKS ? 0 : MYRANK + 1
 
 #Vertical direction isn't MPI-ized, so the rank's local values = the global values
 const K_BEG       = 1
-const MASTERPROC  = (MYRANK == 0)
+const MASTERRANK  = 0
+const MASTERPROC  = (MYRANK == MASTERRANK)
 
 const HS          = 2
 const STEN_SIZE   = 4 #Size of the stencil used for interpolation
@@ -107,6 +123,7 @@ const DX          = XLEN / NX_GLOB
 const DZ          = ZLEN / NZ_GLOB
 const DT          = min(DX,DZ) / MAX_SPEED * CFL
 const NQPOINTS    = 3
+const PI          = Float64(3.14159265358979323846264338327)
 const GRAV        = Float64(9.8)
 const CP          = Float64(1004.0) # Specific heat of dry air at constant pressure
 const CV          = Float64(717.0)  # Specific heat of dry air at constant volume
@@ -125,8 +142,7 @@ const DIR_Z       = 2 #Integer constant to express that this operation is in the
 
 const DATA_SPEC_COLLISION       = 1
 const DATA_SPEC_THERMAL         = 2
-const DATA_SPEC_MOUNTAIN        = 3
-const DATA_SPEC_TURBULENCE      = 4
+const DATA_SPEC_GRAVITY_WAVES   = 3
 const DATA_SPEC_DENSITY_CURRENT = 5
 const DATA_SPEC_INJECTION       = 6
 
@@ -158,7 +174,6 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
-
     #Initialize the grid and the data  
     (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
@@ -168,25 +183,20 @@ function main(args::Vector{String})
     # JACC load shared library
     # JACC call function in the lib to allocate and update and maybe change device number
 
-    #libpath = "/ccs/home/grnydawn/repos/github/jlweather/run/crusher/jopenacc.so"
-    libpath = "./jopenacc.so"
+    libpath = joinpath(WORKDIR, "jopenacc.so")
     dlib = dlopen(libpath, RTLD_LAZY|RTLD_DEEPBIND|RTLD_GLOBAL)
 
     func = dlsym(dlib, :jai_allocate)
-    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}}), state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int)
+    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}}), state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-
-    func = dlsym(dlib, :jai_updateto_init)
-    ccall(func, Int64, (Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}}), hy_dens_cell, hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
+    func = dlsym(dlib, :jai_updateto)
+    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}}), state, statetmp, hy_dens_cell, hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
     #Initial reductions for mass, kinetic energy, and total energy
-
     local mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
-
     #Output the initial state
-    # YSK output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
+    output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
     
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
@@ -197,16 +207,9 @@ function main(args::Vector{String})
         end
 
         #Perform a single time step
-        if MASTERPROC
-            #Profile.@profile timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-            timestep!(dlib, state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-                      sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
-                      hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-        else
-            timestep!(dlib, state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-                      sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
-                      hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-        end
+        perform_timestep!(dlib, state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+                  sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+                  hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
         #Update the elapsed time and output counter
         etime = etime + dt
@@ -216,15 +219,10 @@ function main(args::Vector{String})
         if (output_counter >= OUT_FREQ)
           #Increment the number of outputs
           nt = nt + 1
-          # YSK output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
+          output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
           output_counter = output_counter - OUT_FREQ
         end
 
-        #println("SUM(state) = ", sum(state))
-    end
-
-    if MASTERPROC
-	    #Profile.print()
     end
 
     local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
@@ -232,8 +230,7 @@ function main(args::Vector{String})
     # JACC call function from lib to deallocate and maybe recover device number
 
     func = dlsym(dlib, :jai_deallocate)
-    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}}), state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
-			hy_dens_int, hy_dens_theta_int, hy_pressure_int)
+    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}}), state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
@@ -297,7 +294,6 @@ function init!()
             if(DATA_SPEC==DATA_SPEC_COLLISION)      ; r,u,w,t,hr,ht = collision!(x,z)      ; end
             if(DATA_SPEC==DATA_SPEC_THERMAL)        ; r,u,w,t,hr,ht = thermal!(x,z)        ; end
             if(DATA_SPEC==DATA_SPEC_GRAVITY_WAVES)  ; r,u,w,t,hr,ht = gravity_waves!(x,z)  ; end
-            if(DATA_SPEC==DATA_SPEC_TURBULENCE)     ; r,u,w,t,hr,ht = turbulence!(x,z)     ; end
             if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(x,z); end
             if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(x,z)      ; end
 
@@ -378,31 +374,20 @@ function density_current!(x::Float64, z::Float64)
     return r, u, w, t, hr, ht
 end
 
-function turbulence!(x::Float64, z::Float64)
+function gravity_waves!(x::Float64, z::Float64)
 
     #Hydrostatic density and potential temperature
-    hr,ht = hydro_const_theta!(z)
+    hr,ht = hydro_const_bvfreq!(z, Float64(0.02))
 
     r  = Float64(0.0) # Density
     t  = Float64(0.0) # Potential temperature
-    u  = Float64(0.0) # Uwind
+    u  = Float64(15.0) # Uwind
     w  = Float64(0.0) # Wwind
     
     return r, u, w, t, hr, ht
 end
 
-function mountain_waves!(x::Float64, z::Float64)
 
-    #Hydrostatic density and potential temperature
-    hr,ht = hydro_const_theta!(z)
-
-    r  = Float64(0.0) # Density
-    t  = Float64(0.0) # Potential temperature
-    u  = Float64(0.0) # Uwind
-    w  = Float64(0.0) # Wwind
-    
-    return r, u, w, t, hr, ht
-end
 
 #Rising thermal
 function thermal!(x::Float64, z::Float64)
@@ -455,16 +440,34 @@ function hydro_const_theta!(z::Float64)
     return r, t
 end
 
+function hydro_const_bvfreq!(z::Float64, bv_freq0::Float64)
+
+    r      = Float64(0.0) # Density
+    t      = Float64(0.0) # Potential temperature
+
+    theta0 = Float64(300.0) # Background potential temperature
+    exner0 = Float64(1.0)   # Surface-level Exner pressure
+
+    t      = theta0 * exp(bv_freq0^Float64(2.0) / GRAV * z) # Potential temperature at z
+    exner  = exner0 - GRAV^Float64(2.0) / (CP * bv_freq0^Float64(2.0)) * (t - theta0) / (t * theta0) # Exner pressure at z
+    p      = P0 * exner^(CP/RD)                # Pressure at z
+    rt     = (p / C0)^(Float64(1.0)/GAMMA)     # rho*theta at z
+    r      = rt / t                            # Density at z
+
+    return r, t
+end
+
+
 #Sample from an ellipse of a specified center, radius, and amplitude at a specified location
 function sample_ellipse_cosine!(   x::Float64,    z::Float64, amp::Float64, 
                                   x0::Float64,   z0::Float64, 
                                 xrad::Float64, zrad::Float64 )
 
     #Compute distance from bubble center
-    local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * pi / Float64(2.0)
+    local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * PI / Float64(2.0)
  
     #If the distance from bubble center is less than the radius, create a cos**2 profile
-    if (dist <= pi / Float64(2.0) ) 
+    if (dist <= PI / Float64(2.0) ) 
       val = amp * cos(dist)^2
     else
       val = Float64(0.0)
@@ -480,7 +483,7 @@ end
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-function timestep!(dlib::Ptr{Nothing},
+function perform_timestep!(dlib::Ptr{Nothing},
                    state::OffsetArray{Float64, 3, Array{Float64, 3}},
                    statetmp::OffsetArray{Float64, 3, Array{Float64, 3}},
                    flux::Array{Float64, 3},
@@ -497,7 +500,7 @@ function timestep!(dlib::Ptr{Nothing},
                    hy_pressure_int::Vector{Float64})
     
     local direction_switch = true
-    
+
     if direction_switch
         
         #x-direction first
@@ -561,9 +564,10 @@ end
 #Perform a single semi-discretized step in time with the form:
 #state_out = state_init + dt * rhs(state_forcing)
 #Meaning the step starts from state_init, computes the rhs using state_forcing, and stores the result in state_out
-function semi_discrete_step!(dlib::Ptr{Nothing}, stateinit::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    stateforcing::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    stateout::OffsetArray{Float64, 3, Array{Float64, 3}},
+function semi_discrete_step!(dlib::Ptr{Nothing},
+                    state_init::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_forcing::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_out::OffsetArray{Float64, 3, Array{Float64, 3}},
                     dt::Float64,
                     dir::Int,
                     flux::Array{Float64, 3},
@@ -580,47 +584,38 @@ function semi_discrete_step!(dlib::Ptr{Nothing}, stateinit::OffsetArray{Float64,
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
-        set_halo_values_x!(stateforcing, recvbuf_l, recvbuf_r, sendbuf_l,
+        set_halo_values_x!(dlib, state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
                            sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
         #Compute the time tendencies for the fluid state in the x-direction
-        compute_tendencies_x!(dlib, stateforcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
-
-        
+        compute_tendencies_x!(dlib, state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
+      
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
-        set_halo_values_z!(stateforcing, hy_dens_cell, hy_dens_theta_cell)
+        set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
         
         #Compute the time tendencies for the fluid state in the z-direction
-		if !(COMPILE == nothing) 
-            compute_tendencies_z_accel!(dlib, stateforcing,flux,tend,dt,
-                            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
-            #compute_tendencies_z_julia!(dlib, stateforcing,flux,tend,dt,
-            #                hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-		else
-            compute_tendencies_z_julia!(stateforcing,flux,tend,dt,
-                            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
-		end
-
+        compute_tendencies_z!(dlib, state_forcing,flux,tend,dt,
+                    hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
   
     #Apply the tendencies to the fluid state
-    # JACC call function in lib
-
-    for ll in 1:NUM_VARS
-        for k in 1:NZ
-            for i in 1:NX
-                stateout[i,k,ll] = stateinit[i,k,ll] + dt * tend[i,k,ll]
-            end
-        end
-    end
+    func = dlsym(dlib, :jai_tend_apply)
+    ccall(func, Int64, (
+            Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},
+            Ptr{Array{Float64, 3}},
+            Ptr{OffsetVector{Float64, Vector{Float64}}},
+            Ref{Float64},
+            Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}}
+        ),
+        state_init, tend, hy_dens_cell, dt, state_out
+    )
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI
-function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+function set_halo_values_x!(dlib::Ptr{Nothing},
+                    state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     recvbuf_l::Array{Float64, 3},
                     recvbuf_r::Array{Float64, 3},
                     sendbuf_l::Array{Float64, 3},
@@ -628,6 +623,15 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
+    if NRANKS == 1
+        func = dlsym(dlib, :jai_halo_1rank)
+        ccall(func, Int64, (
+                Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},
+            ),
+            state
+        )
+        return
+    end
 
     local req_r = Vector{Request}(undef, 2)
     local req_s = Vector{Request}(undef, 2)
@@ -689,14 +693,8 @@ function compute_tendencies_x!(dlib::Ptr{Nothing}, state::OffsetArray{Float64, 3
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
 
-    func = dlsym(dlib, :jai_updateto)
-    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},), state)
-
     func = dlsym(dlib, :jai_tend_x)
     ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ref{Float64},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{OffsetVector{Float64, Vector{Float64}}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}}), state, dt,hy_dens_cell, hy_dens_theta_cell, flux, tend)
-
-    func = dlsym(dlib, :jai_updatefrom)
-    ccall(func, Int64, (Ptr{Array{Float64, 3}},), tend)
 
 end
 
@@ -729,7 +727,7 @@ function set_halo_values_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
 
 end
 
-function compute_tendencies_z_accel!(dlib::Ptr{Nothing}, state::OffsetArray{Float64, 3, Array{Float64, 3}},
+function compute_tendencies_z!(dlib::Ptr{Nothing}, state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     flux::Array{Float64, 3},
                     tend::Array{Float64, 3},
                     dt::Float64,
@@ -737,42 +735,9 @@ function compute_tendencies_z_accel!(dlib::Ptr{Nothing}, state::OffsetArray{Floa
                     hy_dens_theta_int::Vector{Float64},
                     hy_pressure_int::Vector{Float64})
 
-    func = dlsym(dlib, :jai_updateto)
-    ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},), state)
-
     func = dlsym(dlib, :jai_tend_z)
     ccall(func, Int64, (Ptr{OffsetArray{Float64, 3, Array{Float64, 3}}},Ref{Float64},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Vector{Float64}},Ptr{Array{Float64, 3}},Ptr{Array{Float64, 3}}), state, dt, hy_dens_int, hy_dens_theta_int, hy_pressure_int, flux, tend)
 
-    func = dlsym(dlib, :jai_updatefrom)
-    ccall(func, Int64, (Ptr{Array{Float64, 3}},), tend)
-
-end
-
-function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
-                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
-    
-    local mass, te, r, u, w, th, p, t, ke, le = [zero(Float64) for _ in 1:10] 
-    glob = Array{Float64}(undef, 2)
-
-    for k in 1:NZ
-        for i in 1:NX
-            r  =   state[i,k,ID_DENS] + hy_dens_cell[k]             # Density
-            u  =   state[i,k,ID_UMOM] / r                           # U-wind
-            w  =   state[i,k,ID_WMOM] / r                           # W-wind
-            th = ( state[i,k,ID_RHOT] + hy_dens_theta_cell[k] ) / r # Potential Temperature (theta)
-            p  = C0*(r*th)^GAMMA      # Pressure
-            t  = th / (P0/p)^(RD/CP)  # Temperature
-            ke = r*(u*u+w*w)          # Kinetic Energy
-            ie = r*CV*t               # Internal Energy
-            mass = mass + r            *DX*DZ # Accumulate domain mass
-            te   = te   + (ke + r*CV*t)*DX*DZ # Accumulate domain total energy
-        end
-    end
-    
-    Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
-    
-    return glob
 end
 
 #Output the fluid state (state) to a NetCDF file at a given elapsed model time (etime)
@@ -817,12 +782,12 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
        if NRANKS > 1
           for i in 2:NRANKS
               var_local = Array{Float64}(undef, nchunk[i],NZ,NUM_VARS)
-              status = MPI.Recv!(var_local,i-1,0,COMM)
+              status = Recv!(var_local,i-1,0,COMM)
               var_global[ibeg_chunk[i]:iend_chunk[i],:,:] = var_local[:,:,:]
           end
        end
     else
-       MPI.Send(var_local,MASTERRANK,0,COMM)
+       Send(var_local,MASTERRANK,0,COMM)
     end
 
     # Write output only in MASTER
@@ -832,8 +797,7 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
        if ( etime == 0.0 )
 
           # Open NetCDF output file with a create mode
-          ds = Dataset("/gpfs/alpine/cli133/scratch/grnydawn/output.nc","c")
-          #ds = Dataset("output.nc","c")
+          ds = Dataset(OUTFILE,"c")
 
           defDim(ds,"t",Inf)
           defDim(ds,"x",NX_GLOB)
@@ -856,8 +820,7 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
        else
 
           # Open NetCDF output file with an append mode
-          ds = Dataset("/gpfs/alpine/cli133/scratch/grnydawn/output.nc","a")
-          #ds = Dataset("output.nc","a")
+          ds = Dataset(OUTFILE,"a")
 
           nc_var = ds["t"]
           nc_var[nt] = etime
@@ -877,6 +840,32 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     end # MASTER
 end
 
+function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
+    
+    local mass, te, r, u, w, th, p, t, ke, le = [zero(Float64) for _ in 1:10] 
+    glob = Array{Float64}(undef, 2)
+
+    for k in 1:NZ
+        for i in 1:NX
+            r  =   state[i,k,ID_DENS] + hy_dens_cell[k]             # Density
+            u  =   state[i,k,ID_UMOM] / r                           # U-wind
+            w  =   state[i,k,ID_WMOM] / r                           # W-wind
+            th = ( state[i,k,ID_RHOT] + hy_dens_theta_cell[k] ) / r # Potential Temperature (theta)
+            p  = C0*(r*th)^GAMMA      # Pressure
+            t  = th / (P0/p)^(RD/CP)  # Temperature
+            ke = r*(u*u+w*w)          # Kinetic Energy
+            ie = r*CV*t               # Internal Energy
+            mass = mass + r            *DX*DZ # Accumulate domain mass
+            te   = te   + (ke + r*CV*t)*DX*DZ # Accumulate domain total energy
+        end
+    end
+    
+    Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
+    
+    return glob
+end
 
 function finalize!(state::OffsetArray{Float64, 3, Array{Float64, 3}})
 
@@ -886,4 +875,3 @@ end
 
 # invoke main function
 main(ARGS)
-#@run main(ARGS)

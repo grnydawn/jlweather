@@ -13,7 +13,18 @@ import NCDatasets.Dataset,
        NCDatasets.defDim,
        NCDatasets.defVar
 
-import MPI
+import MPI.Init,
+       MPI.COMM_WORLD,
+       MPI.Comm_rank,
+       MPI.Comm_size,
+       MPI.Allreduce!,
+       MPI.Barrier,
+       MPI.Waitall!,
+       MPI.Request,
+       MPI.Irecv!,
+       MPI.Isend,
+       MPI.Recv!,
+       MPI.Send
 
 import Debugger
 
@@ -27,10 +38,10 @@ import Libdl
     
 # julia command to link MPI.jl to system MPI installation
 # julia -e 'ENV["JULIA_MPI_BINARY"]="system"; ENV["JULIA_MPI_PATH"]="/Users/8yk/opt/usr/local"; using Pkg; Pkg.build("MPI"; verbose=true)'
-MPI.Init()
-const COMM   = MPI.COMM_WORLD
-const NRANKS = MPI.Comm_size(COMM)
-const MYRANK = MPI.Comm_rank(COMM)
+Init()
+const COMM   = COMM_WORLD
+const NRANKS = Comm_size(COMM)
+const MYRANK = Comm_rank(COMM)
 
 s = ArgParseSettings()
 @add_arg_table! s begin
@@ -57,6 +68,12 @@ s = ArgParseSettings()
     "--outfile", "-o"
         help = "output file path"
         default = "output.nc"
+    "--workdir", "-w"
+        help = "working directory path"
+        default = ".jaitmp"
+    "--debugdir", "-b"
+        help = "debugging output directory path"
+        default = ".jaitmp"
 
 end
 
@@ -68,6 +85,8 @@ const NZ_GLOB     = parsed_args["nz"]
 const OUT_FREQ    = parsed_args["outfreq"]
 const DATA_SPEC   = parsed_args["dataspec"]
 const OUTFILE     = parsed_args["outfile"]
+const WORKDIR     = parsed_args["workdir"]
+const DEBUGDIR    = parsed_args["debugdir"]
 
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
@@ -121,7 +140,6 @@ const DATA_SPEC_INJECTION       = 6
 const qpoints     = Array{Float64}([0.112701665379258311482073460022E0 , 0.500000000000000000000000000000E0 , 0.887298334620741688517926539980E0])
 const qweights    = Array{Float64}([0.277777777777777777777777777779E0 , 0.444444444444444444444444444444E0 , 0.277777777777777777777777777779E0])
 
-
 ##############
 # functions
 ##############
@@ -147,7 +165,6 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
-  
     #Initialize the grid and the data  
     (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
@@ -169,7 +186,7 @@ function main(args::Vector{String})
         end
 
         #Perform a single time step
-        timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+        perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
                   sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
                   hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
@@ -188,13 +205,11 @@ function main(args::Vector{String})
     end
 
     local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
-    
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
     end
-        
     finalize!(state)
 
 end
@@ -209,7 +224,7 @@ function init!()
         
     #println("nx, nz at $MYRANK: $NX($I_BEG:$I_END) $NZ($K_BEG:$NZ)")
     
-    MPI.Barrier(COMM)
+    Barrier(COMM)
     
     _state      = zeros(Float64, NX+2*HS, NZ+2*HS, NUM_VARS) 
     state       = OffsetArray(_state, 1-HS:NX+HS, 1-HS:NZ+HS, 1:NUM_VARS)
@@ -292,9 +307,9 @@ function init!()
         if(DATA_SPEC==DATA_SPEC_DENSITY_CURRENT); r,u,w,t,hr,ht = density_current!(0.0,z); end
         if(DATA_SPEC==DATA_SPEC_INJECTION)      ; r,u,w,t,hr,ht = injection!(0.0,z)      ; end
 
-      hy_dens_int[k] = hr
-      hy_dens_theta_int[k] = hr*ht
-      hy_pressure_int[k] = C0*(hr*ht)^GAMMA
+        hy_dens_int[k] = hr
+        hy_dens_theta_int[k] = hr*ht
+        hy_pressure_int[k] = C0*(hr*ht)^GAMMA
     end
     
     return (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
@@ -438,7 +453,7 @@ end
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-function timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+function perform_timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                    statetmp::OffsetArray{Float64, 3, Array{Float64, 3}},
                    flux::Array{Float64, 3},
                    tend::Array{Float64, 3},
@@ -518,9 +533,9 @@ end
 #Perform a single semi-discretized step in time with the form:
 #state_out = state_init + dt * rhs(state_forcing)
 #Meaning the step starts from state_init, computes the rhs using state_forcing, and stores the result in state_out
-function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    stateforcing::OffsetArray{Float64, 3, Array{Float64, 3}},
-                    stateout::OffsetArray{Float64, 3, Array{Float64, 3}},
+function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_forcing::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_out::OffsetArray{Float64, 3, Array{Float64, 3}},
                     dt::Float64,
                     dir::Int,
                     flux::Array{Float64, 3},
@@ -537,24 +552,23 @@ function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
-        set_halo_values_x!(stateforcing, recvbuf_l, recvbuf_r, sendbuf_l,
+        set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
                            sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
         #Compute the time tendencies for the fluid state in the x-direction
-        compute_tendencies_x!(stateforcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
+        compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
 
         
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
-        set_halo_values_z!(stateforcing, hy_dens_cell, hy_dens_theta_cell)
+        set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
         
         #Compute the time tendencies for the fluid state in the z-direction
-        compute_tendencies_z!(stateforcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell,
-                            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-
+        compute_tendencies_z!(state_forcing,flux,tend,dt,
+                    hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
-    
+  
     #Apply the tendencies to the fluid state
     for ll in 1:NUM_VARS
         for k in 1:NZ
@@ -581,7 +595,7 @@ function semi_discrete_step!(stateinit::OffsetArray{Float64, 3, Array{Float64, 3
                     tend[i,k,ID_WMOM] = tend[i,k,ID_WMOM] + wpert*hy_dens_cell[k]
                 end
 
-                stateout[i,k,ll] = stateinit[i,k,ll] + dt * tend[i,k,ll]
+                state_out[i,k,ll] = state_init[i,k,ll] + dt * tend[i,k,ll]
             end
         end
     end
@@ -597,7 +611,6 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-
     if NRANKS == 1
         for ll in 1:NUM_VARS
             for k in 1:NZ
@@ -610,13 +623,14 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
         return
     end
 
-    local req_r = Vector{MPI.Request}(undef, 2)
-    local req_s = Vector{MPI.Request}(undef, 2)
+
+    local req_r = Vector{Request}(undef, 2)
+    local req_s = Vector{Request}(undef, 2)
 
     
     #Prepost receives
-    req_r[1] = MPI.Irecv!(recvbuf_l, LEFT_RANK,0,COMM)
-    req_r[2] = MPI.Irecv!(recvbuf_r,RIGHT_RANK,1,COMM)
+    req_r[1] = Irecv!(recvbuf_l, LEFT_RANK,0,COMM)
+    req_r[2] = Irecv!(recvbuf_r,RIGHT_RANK,1,COMM)
 
     #Pack the send buffers
     for ll in 1:NUM_VARS
@@ -629,11 +643,11 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     end
 
     #Fire off the sends
-    req_s[1] = MPI.Isend(sendbuf_l, LEFT_RANK,1,COMM)
-    req_s[2] = MPI.Isend(sendbuf_r,RIGHT_RANK,0,COMM)
+    req_s[1] = Isend(sendbuf_l, LEFT_RANK,1,COMM)
+    req_s[2] = Isend(sendbuf_r,RIGHT_RANK,0,COMM)
 
     #Wait for receives to finish
-    local statuses = MPI.Waitall!(req_r)
+    local statuses = Waitall!(req_r)
 
     #Unpack the receive buffers
     for ll in 1:NUM_VARS
@@ -646,7 +660,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     end
 
     #Wait for sends to finish
-    local statuses = MPI.Waitall!(req_s)
+    local statuses = Waitall!(req_s)
     
     if (DATA_SPEC == DATA_SPEC_INJECTION)
        if (MYRANK == 0)
@@ -749,8 +763,6 @@ function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     flux::Array{Float64, 3},
                     tend::Array{Float64, 3},
                     dt::Float64,
-                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
-                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_int::Vector{Float64},
                     hy_dens_theta_int::Vector{Float64},
                     hy_pressure_int::Vector{Float64})
@@ -811,7 +823,7 @@ function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
 
 
 end
-            
+
 function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
@@ -834,7 +846,7 @@ function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
         end
     end
     
-    MPI.Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
+    Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
     
     return glob
 end
@@ -881,12 +893,12 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
        if NRANKS > 1
           for i in 2:NRANKS
               var_local = Array{Float64}(undef, nchunk[i],NZ,NUM_VARS)
-              status = MPI.Recv!(var_local,i-1,0,COMM)
+              status = Recv!(var_local,i-1,0,COMM)
               var_global[ibeg_chunk[i]:iend_chunk[i],:,:] = var_local[:,:,:]
           end
        end
     else
-       MPI.Send(var_local,MASTERRANK,0,COMM)
+       Send(var_local,MASTERRANK,0,COMM)
     end
 
     # Write output only in MASTER

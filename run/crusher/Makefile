@@ -3,8 +3,8 @@
 #SIM_TIME := 400.0
 OUT_FREQ := 100.0
 SIM_TIME := 100.0
-NX := 200
-NZ := 100
+NX := 100
+NZ := 50
 #SIM_TIME := 10.0 #10.0
 #OUT_FREQ := 10.0 # 10.0
 #NX := 6400 # 640 
@@ -20,7 +20,8 @@ DATA_SPEC_INJECTION       := 6
 DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
 ACCEL_TYPE := fortran_openacc
-WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp
+WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp1
+#WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp
 DEBUG_DIR := ${WORK_DIR}
 OUT_FILE  := ${WORK_DIR}/output.nc
 
@@ -37,7 +38,7 @@ MANUALFORTSRC := ${SRCDIR}/manual/openacc_driver_${NX}x${NZ}.F90
 
 ARGS := -s ${SIM_TIME} -x ${NX} -z ${NZ} -f ${OUT_FREQ} \
 		-d ${DATA_SPEC} -o ${OUT_FILE} -w ${WORK_DIR} \
-		-a ${ACCEL_TYPE} -b ${DEBUG_DIR}
+		-b ${DEBUG_DIR}
 
 CC := cc
 CXX := CC
@@ -50,7 +51,7 @@ MACROS := -D_NX=${NX} -D_NZ=${NZ} -D_SIM_TIME=${SIM_TIME} -D_OUT_FREQ=${OUT_FREQ
 F_FLAGS := ${INCLUDES} ${LIBS} ${MACROS}
 
 jai:
-	${JULIA} --color=yes -O -- ${JAISRC} ${ARGS}
+	${JULIA} --color=yes -O -- ${JAISRC} ${ARGS} -a ${ACCEL_TYPE} 
 
 julia:
 	${JULIA} --color=yes -O -- ${JLSRC} ${ARGS}
@@ -68,8 +69,12 @@ fortomp: ${FORTOMPSRC}
 	${FC} ${F_FLAGS} -h noacc,omp -o miniweather_fortomp.exe $<
 
 manual: ${MANUALFORTSRC}
-	ftn -shared -fPIC -h acc,noomp -o jopenacc.so $<
+	ftn -shared -fPIC -h acc,noomp -o ${WORK_DIR}/jopenacc.so $<
 	${JULIA} ${MANUALJLSRC} ${ARGS}
+
+all: fort fortacc julia jai
+	./miniweather_fort.exe
+	./ miniweather_fortacc.exe
 
 clean:
 	rm -rf *.so core *.mod .jaitmp *.o *.s *.exe output.nc

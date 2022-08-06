@@ -199,10 +199,10 @@ function main(args::Vector{String})
     local nt = Int(1)
 
 
-    @jaccel myaccel framework(ACCEL) constant(NX, NZ, DX, DZ, HS,
+    @jaccel myaccel framework(ACCEL) device(MYRANK%8) constant(NX, NZ, DX, DZ, HS,
                 NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV, RD, CP, CV, ID_DENS,
                 ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE, DATA_SPEC, PI, I_BEG,
-                K_BEG, XLEN, DATA_SPEC_GRAVITY_WAVES,) compile(COMPILE) set(
+                K_BEG, XLEN, ZLEN, DATA_SPEC_GRAVITY_WAVES,) compile(COMPILE) set(
                 master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR)
 
     @jkernel reduce_kernel myaccel PATH_REDUCTION_KERNEL
@@ -224,7 +224,7 @@ function main(args::Vector{String})
             hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int,
             sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-	@jenterdata myaccel update(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
+	@jenterdata myaccel updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
 
@@ -676,7 +676,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Pack the send buffers
     @jlaunch(halo_sendbuf_kernel, state; output=(sendbuf_l, sendbuf_r))
 
-    @jexitdata myaccel update(sendbuf_l, sendbuf_r) async
+    @jexitdata myaccel updatefrom(sendbuf_l, sendbuf_r) async
     @jwait myaccel
 
     #Fire off the sends
@@ -686,7 +686,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Wait for receives to finish
     local statuses = Waitall!(req_r)
 
-    @jenterdata myaccel update(recvbuf_l,recvbuf_r) async
+    @jenterdata myaccel updateto(recvbuf_l,recvbuf_r) async
 
     #Unpack the receive buffers
     @jlaunch(halo_recvbuf_kernel, recvbuf_l, recvbuf_r; output=(state,))
@@ -743,8 +743,6 @@ function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     local te = zero(Float64)
     glob = Array{Float64}(undef, 2)
 
-	#@jenterdata myaccel update(state)
-
     @jlaunch(reduce_kernel, state, hy_dens_cell, hy_dens_theta_cell; output=(glob,))
 
     mass = glob[1]
@@ -762,7 +760,7 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                 hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                 hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jexitdata myaccel update(state)
+    @jexitdata myaccel updatefrom(state)
 
     var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 

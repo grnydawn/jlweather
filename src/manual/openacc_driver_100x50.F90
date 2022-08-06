@@ -26,13 +26,67 @@ REAL (C_DOUBLE ), PARAMETER :: PI = 3.141592653589793
 INTEGER (C_INT64_T ), PARAMETER :: I_BEG = 1
 INTEGER (C_INT64_T ), PARAMETER :: K_BEG = 1
 REAL (C_DOUBLE ), PARAMETER :: XLEN = 20000.0
+REAL (C_DOUBLE ), PARAMETER :: ZLEN = 10000.0
 INTEGER (C_INT64_T ), PARAMETER :: DATA_SPEC_GRAVITY_WAVES = 3
 
-public jai_allocate, jai_updateto, jai_tend_x, jai_tend_z, jai_reductions, jai_deallocate 
+public jai_allocate, jai_updateto, jai_tend_x, jai_tend_z, jai_reductions
 public jai_tend_apply, jai_halo_z, jai_halo_1rank, jai_halo_inject
+public jai_halo_sendbuf, jai_halo_recvbuf, jai_deallocate
+public jai_updatefrombuf, jai_updatetobuf
 public jai_get_num_devices, jai_get_device_num, jai_set_device_num, jai_wait
 
 contains
+
+INTEGER (C_INT64_T) FUNCTION jai_halo_recvbuf(recvbuf_l,recvbuf_r,state) BIND(C, name="jai_halo_recvbuf")
+USE, INTRINSIC :: ISO_C_BINDING
+IMPLICIT NONE
+
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(IN) :: recvbuf_l
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(IN) :: recvbuf_r
+REAL (C_DOUBLE ), DIMENSION(-1:102, -1:52, 1:4), INTENT(OUT) :: state
+
+INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
+
+    integer :: s,k,ll
+    !$acc parallel loop collapse(3) present(state, recvbuf_l, recvbuf_r) ! async
+    do ll = 1 , NUM_VARS
+      do k = 1 , nz
+        do s = 1 , hs
+          state(-hs+s,k,ll) = recvbuf_l(s,k,ll)
+          state(nx+s ,k,ll) = recvbuf_r(s,k,ll)
+        enddo
+      enddo
+    enddo
+
+jai_halo_recvbuf = JAI_ERRORCODE
+
+END FUNCTION
+
+INTEGER (C_INT64_T) FUNCTION jai_halo_sendbuf(state,sendbuf_l,sendbuf_r) BIND(C, name="jai_halo_sendbuf")
+USE, INTRINSIC :: ISO_C_BINDING
+IMPLICIT NONE
+
+REAL (C_DOUBLE ), DIMENSION(-1:102, -1:52, 1:4), INTENT(IN) :: state
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(OUT) :: sendbuf_l
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(OUT) :: sendbuf_r
+
+INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
+
+    integer :: s,k,ll
+
+    !$acc parallel loop collapse(3) present(state, sendbuf_l, sendbuf_r) ! async
+    do ll = 1 , NUM_VARS
+      do k = 1 , nz
+        do s = 1 , hs
+          sendbuf_l(s,k,ll) = state(s      ,k,ll)
+          sendbuf_r(s,k,ll) = state(nx-hs+s,k,ll)
+        enddo
+      enddo
+    enddo
+
+jai_halo_sendbuf = JAI_ERRORCODE
+
+END FUNCTION
 
 INTEGER (C_INT64_T) FUNCTION jai_get_num_devices(buf) BIND(C, name="jai_get_num_devices")
 USE, INTRINSIC :: ISO_C_BINDING
@@ -178,6 +232,7 @@ INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
     real(C_DOUBLE) :: r,u,w,th,p,t,ke,ie, mass, te
     mass = 0.
     te = 0.
+
     !$acc parallel loop collapse(2) reduction(+:mass,te) present(state, hy_dens_cell, hy_dens_theta_cell)
     do k = 1 , nz
       do i = 1 , nx
@@ -193,6 +248,8 @@ INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
         te   = te   + (ke + r*cv*t)*dx*dz ! Accumulate domain total energy
       enddo
     enddo
+
+
     glob(1) = mass
     glob(2) = te
 
@@ -279,8 +336,8 @@ INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
 
     integer :: i,k,ll,s
     real(C_DOUBLE) :: x, z, wpert, dist, x0, z0, xrad, zrad, amp
+
     !Apply the tendencies to the fluid state
-    !!!!$acc parallel loop collapse(3) async
     !$acc parallel loop collapse(3) present(state_init, state_out, tend, hy_dens_cell) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
@@ -325,6 +382,7 @@ REAL (C_DOUBLE ), DIMENSION(-1:52), INTENT(IN) :: hy_dens_cell
 INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
 
     integer :: i, ll
+
     !$acc parallel loop collapse(2) present(state, hy_dens_cell) async
     do ll = 1 , NUM_VARS
       do i = 1-hs,nx+hs
@@ -458,30 +516,51 @@ REAL (C_DOUBLE ), DIMENSION(-1:52), INTENT(IN) :: hy_dens_theta_cell
 
 INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
 
-    integer :: k,ll
-    !$acc parallel loop collapse(2) present(state) async
-    do ll = 1 , NUM_VARS
-        do k = 1 , nz
-          state(-1  ,k,ll) = state(nx-1,k,ll)
-          state(0   ,k,ll) = state(nx  ,k,ll)
-          state(nx+1,k,ll) = state(1   ,k,ll)
-          state(nx+2,k,ll) = state(2   ,k,ll)
-        enddo
+    integer :: k
+    real(C_DOUBLE) :: z
+
+    !$acc parallel loop present(state, hy_dens_cell, hy_dens_theta_cell) ! async
+    do k = 1 , nz
+      z = (k_beg-1 + k-0.5_8)*dz
+      if (abs(z-3*zlen/4) <= zlen/16) then
+        state(-1:0,k,ID_UMOM) = (state(-1:0,k,ID_DENS)+hy_dens_cell(k)) * 50._8
+        state(-1:0,k,ID_RHOT) = (state(-1:0,k,ID_DENS)+hy_dens_cell(k)) * 298._8 - hy_dens_theta_cell(k)
+      endif
     enddo
 
 jai_halo_inject = JAI_ERRORCODE
 
 END FUNCTION
 
-INTEGER (C_INT64_T) FUNCTION jai_updatefrom(tend) BIND(C, name="jai_updatefrom")
+INTEGER (C_INT64_T) FUNCTION jai_updatefrombuf(sendbuf_l, sendbuf_r) BIND(C, name="jai_updatefrombuf")
 USE, INTRINSIC :: ISO_C_BINDING
 
-REAL (C_DOUBLE ), DIMENSION(1:100, 1:50, 1:4), INTENT(IN) :: tend
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(IN) :: sendbuf_l
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(IN) :: sendbuf_r
+
 INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
 
-!$acc update host(tend)
+!$acc update host(sendbuf_l)
 
-jai_updatefrom = JAI_ERRORCODE
+!$acc update host(sendbuf_r)
+
+jai_updatefrombuf = JAI_ERRORCODE
+
+END FUNCTION
+
+INTEGER (C_INT64_T) FUNCTION jai_updatetobuf(recvbuf_l,recvbuf_r) BIND(C, name="jai_updatetobuf")
+USE, INTRINSIC :: ISO_C_BINDING
+
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(IN) :: recvbuf_l
+REAL (C_DOUBLE ), DIMENSION(1:2, 1:50, 1:4), INTENT(IN) :: recvbuf_r
+
+INTEGER (C_INT64_T) :: JAI_ERRORCODE  = 0
+
+!$acc update device(recvbuf_l) async
+
+!$acc update device(recvbuf_r) async
+
+jai_updatetobuf = JAI_ERRORCODE
 
 END FUNCTION
 

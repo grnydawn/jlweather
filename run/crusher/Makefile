@@ -1,8 +1,8 @@
 # example command: srun  -n 2 -- make
 
-#SIM_TIME := 400.0
-OUT_FREQ := 100.0
 SIM_TIME := 100.0
+OUT_FREQ := 100.0
+#SIM_TIME := 100.0
 NX := 100
 NZ := 50
 #SIM_TIME := 10.0 #10.0

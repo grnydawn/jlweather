@@ -9,6 +9,8 @@
 
 program miniweather
   use mpi
+  use openacc
+
   implicit none
   !Declare the precision for the real constants (at least 15 digits of accuracy = double precision)
 #ifdef SINGLE_PREC
@@ -109,6 +111,8 @@ program miniweather
 
   !Initialize MPI, allocate arrays, initialize the grid and the data
   call init(dt)
+
+  call acc_set_device_num(mod(myrank, 8), acc_device_default)
 
   !$acc data copyin(state_tmp,hy_dens_cell,hy_dens_theta_cell,hy_dens_int,hy_dens_theta_int,hy_pressure_int) create(flux,tend,sendbuf_l,sendbuf_r,recvbuf_l,recvbuf_r) copy(state)
 

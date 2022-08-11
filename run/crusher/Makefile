@@ -60,7 +60,7 @@ debug:
 	${JULIA} --color=yes --check-bounds=yes -O0 ${SRC} ${ARGS}
 
 fort: ${FORTSRC}
-	${FC} ${F_FLAGS} -o miniweather_fort.exe $<
+	${FC} ${F_FLAGS} -h noacc,noomp -o miniweather_fort.exe $<
 
 fortacc: ${FORTACCSRC}
 	${FC} ${F_FLAGS} -h acc,noomp -o miniweather_fortacc.exe $<

@@ -113,13 +113,13 @@ const WORKDIR     = parsed_args["workdir"]
 const DEBUGDIR    = parsed_args["debugdir"]
 const ACCEL       = parsed_args["accel"]
 
-if ACCEL == "fortran"
-    const COMPILE = COMPILE_FORTRAN
-
-elseif ACCEL == "fortran_openacc"
-    const COMPILE = COMPILE_FOPENACC_CRAY
-
-end
+#if ACCEL == "fortran"
+#    const COMPILE = COMPILE_FORTRAN
+#
+#elseif ACCEL == "fortran_openacc"
+#    const COMPILE = COMPILE_FOPENACC_CRAY
+#
+#end
 
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
@@ -198,33 +198,40 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
+    @jaccel framework(
+                    fortran_openacc=COMPILE_FOPENACC_CRAY,
+                    fortran=COMPILE_FORTRAN,
+                    #priority=("fortran_openacc", "fortran") 
+                ) device(
+                    (MYRANK+1)%8
+                ) constant(
+                    NX, NZ, DX, DZ, HS, NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV,
+                    RD, CP, CV, ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE,
+                    DATA_SPEC, PI, I_BEG, K_BEG, XLEN, ZLEN, DATA_SPEC_GRAVITY_WAVES
+                ) set(
+                    master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR
+                )
 
-    @jaccel myaccel framework(ACCEL) device(MYRANK%8) constant(NX, NZ, DX, DZ, HS,
-                NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV, RD, CP, CV, ID_DENS,
-                ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE, DATA_SPEC, PI, I_BEG,
-                K_BEG, XLEN, ZLEN, DATA_SPEC_GRAVITY_WAVES,) compile(COMPILE) set(
-                master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR)
-
-    @jkernel reduce_kernel myaccel PATH_REDUCTION_KERNEL
-    @jkernel tend_x_kernel myaccel PATH_TEND_X_KERNEL
-    @jkernel tend_z_kernel myaccel PATH_TEND_Z_KERNEL
-    @jkernel tend_apply_kernel myaccel PATH_TEND_APPLY_KERNEL
-    @jkernel halo_1rank_kernel myaccel PATH_HALO_1RANK_KERNEL
-    @jkernel halo_sendbuf_kernel myaccel PATH_HALO_SENDBUF_KERNEL
-    @jkernel halo_recvbuf_kernel myaccel PATH_HALO_RECVBUF_KERNEL
-    @jkernel halo_inject_kernel myaccel PATH_HALO_INJECT_KERNEL
-    @jkernel halo_z_kernel myaccel PATH_HALO_Z_KERNEL
+    @jkernel reduce_kernel PATH_REDUCTION_KERNEL
+    @jkernel tend_x_kernel PATH_TEND_X_KERNEL 
+    @jkernel tend_z_kernel PATH_TEND_Z_KERNEL 
+    @jkernel tend_apply_kernel PATH_TEND_APPLY_KERNEL 
+    @jkernel halo_1rank_kernel PATH_HALO_1RANK_KERNEL 
+    @jkernel halo_sendbuf_kernel PATH_HALO_SENDBUF_KERNEL 
+    @jkernel halo_recvbuf_kernel PATH_HALO_RECVBUF_KERNEL 
+    @jkernel halo_inject_kernel PATH_HALO_INJECT_KERNEL 
+    @jkernel halo_z_kernel PATH_HALO_Z_KERNEL 
 
     #Initialize the grid and the data  
     (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
             sendbuf_r, recvbuf_l, recvbuf_r) = init!()
 
-	@jenterdata myaccel allocate(state, statetmp, flux, tend, hy_dens_cell,
+	@jenterdata allocate(state, statetmp, flux, tend, hy_dens_cell,
             hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int,
             sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-	@jenterdata myaccel updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
+	@jenterdata updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
 
@@ -234,7 +241,7 @@ function main(args::Vector{String})
     #Output the initial state
     output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
 
-    @jwait myaccel
+    @jwait 
     
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
@@ -270,7 +277,7 @@ function main(args::Vector{String})
 
     end
 
-    @jwait myaccel
+    @jwait 
 
     if MASTERPROC
 	    #Profile.print()
@@ -278,7 +285,7 @@ function main(args::Vector{String})
 
     local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
- 	@jexitdata myaccel deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
+ 	@jexitdata deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
 			hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
   
     if MASTERPROC
@@ -287,7 +294,7 @@ function main(args::Vector{String})
         @printf("d_te  : %.15e\n", (te - te0)/te0)
     end
 
-    @jdecel myaccel
+    @jdecel 
 
     finalize!(state)
 
@@ -676,8 +683,8 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Pack the send buffers
     @jlaunch(halo_sendbuf_kernel, state; output=(sendbuf_l, sendbuf_r))
 
-    @jexitdata myaccel updatefrom(sendbuf_l, sendbuf_r) async
-    @jwait myaccel
+    @jexitdata updatefrom(sendbuf_l, sendbuf_r) async
+    @jwait 
 
     #Fire off the sends
     req_s[1] = Isend(sendbuf_l, LEFT_RANK,1,COMM)
@@ -686,7 +693,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Wait for receives to finish
     local statuses = Waitall!(req_r)
 
-    @jenterdata myaccel updateto(recvbuf_l,recvbuf_r) async
+    @jenterdata updateto(recvbuf_l,recvbuf_r) async
 
     #Unpack the receive buffers
     @jlaunch(halo_recvbuf_kernel, recvbuf_l, recvbuf_r; output=(state,))
@@ -760,7 +767,7 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                 hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                 hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jexitdata myaccel updatefrom(state)
+    @jexitdata updatefrom(state)
 
     var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 

@@ -2,7 +2,7 @@
 
     integer :: k,ll
 
-    !$acc parallel loop collapse(2) present(state) !async
+    !$acc parallel loop collapse(2) present(state) async
     do ll = 1 , NUM_VARS
         do k = 1 , nz
           state(-1  ,k,ll) = state(nx-1,k,ll)

@@ -113,14 +113,6 @@ const WORKDIR     = parsed_args["workdir"]
 const DEBUGDIR    = parsed_args["debugdir"]
 const ACCEL       = parsed_args["accel"]
 
-#if ACCEL == "fortran"
-#    const COMPILE = COMPILE_FORTRAN
-#
-#elseif ACCEL == "fortran_openacc"
-#    const COMPILE = COMPILE_FOPENACC_CRAY
-#
-#end
-
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
 const I_END = trunc(Int, round(NPER*(MYRANK+1)))
@@ -236,7 +228,7 @@ function main(args::Vector{String})
 
 
     #Initial reductions for mass, kinetic energy, and total energy
-    local mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
+    mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
     #Output the initial state
     output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
@@ -245,6 +237,8 @@ function main(args::Vector{String})
     
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
+
+        @printf("SIM_TIME: %.3f\n", etime)
 
         #If the time step leads to exceeding the simulation time, shorten it for the last step
         if etime + dt > SIM_TIME
@@ -280,19 +274,19 @@ function main(args::Vector{String})
     @jwait 
 
     if MASTERPROC
-	    #Profile.print()
+	    #Profile.print(format=:flat, C=true, sortedby=:count, mincount=10)
     end
 
-    local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
+    mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
- 	@jexitdata deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
-			hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
-  
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
     end
+ 
+ 	@jexitdata deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
+			hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
     @jdecel 
 
@@ -638,13 +632,14 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
+
         set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
                            sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
         #Compute the time tendencies for the fluid state in the x-direction
         compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
 
-        
+         
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
         set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
@@ -654,9 +649,8 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
                     hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
-  
-    @jlaunch(tend_apply_kernel, state_init, tend, hy_dens_cell, dt; output=(state_out, tend))
 
+     @jlaunch(tend_apply_kernel, state_init, tend, hy_dens_cell, dt; output=(state_out, tend))
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI

@@ -20,7 +20,8 @@ DATA_SPEC_INJECTION       := 6
 DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
 ACCEL_TYPE := fortran_openacc
-WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp1
+WORK_DIR := /gpfs/alpine/cli133/proj-shared/grnydawn/temp1
+#WORK_DIR := /ccs/home/grnydawn/temp/jlweathertests
 #WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp
 DEBUG_DIR := ${WORK_DIR}
 OUT_FILE  := ${WORK_DIR}/output.nc

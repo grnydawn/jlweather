@@ -82,6 +82,10 @@ s = ArgParseSettings()
         help = "output frequency in time"
         arg_type = Float64
         default = 400.0
+    "--logfreq", "-l"
+        help = "logging frequency in time"
+        arg_type = Float64
+        default = 0.0
     "--dataspec", "-d"
         help = "data spec"
         arg_type = Int64
@@ -107,6 +111,8 @@ const SIM_TIME    = parsed_args["simtime"]
 const NX_GLOB     = parsed_args["nx"]
 const NZ_GLOB     = parsed_args["nz"]
 const OUT_FREQ    = parsed_args["outfreq"]
+const _logfreq    = parsed_args["logfreq"]
+const LOG_FREQ    = (_logfreq == 0.0) ? SIM_TIME / 10 : _logfreq
 const DATA_SPEC   = parsed_args["dataspec"]
 const OUTFILE     = parsed_args["outfile"]
 const WORKDIR     = parsed_args["workdir"]
@@ -187,6 +193,7 @@ function main(args::Vector{String})
 
     local etime = Float64(0.0)
     local output_counter = Float64(0.0)
+    local log_counter = Float64(0.0)
     local dt = DT
     local nt = Int(1)
 
@@ -226,7 +233,6 @@ function main(args::Vector{String})
 	@jenterdata updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
-
     #Initial reductions for mass, kinetic energy, and total energy
     mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
@@ -237,8 +243,6 @@ function main(args::Vector{String})
     
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
-
-        @printf("SIM_TIME: %.3f\n", etime)
 
         #If the time step leads to exceeding the simulation time, shorten it for the last step
         if etime + dt > SIM_TIME
@@ -260,6 +264,7 @@ function main(args::Vector{String})
         #Update the elapsed time and output counter
         etime = etime + dt
         output_counter = output_counter + dt
+        log_counter = log_counter + dt
 
         #If it's time for output, reset the counter, and do output
         if (output_counter >= OUT_FREQ)
@@ -267,6 +272,11 @@ function main(args::Vector{String})
           nt = nt + 1
           output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
           output_counter = output_counter - OUT_FREQ
+        end
+
+        if MASTERPROC && (log_counter >= LOG_FREQ)
+          @printf("[%3.1f%% of %2.1f]\n", etime/SIM_TIME*100, SIM_TIME)
+          log_counter = log_counter - LOG_FREQ
         end
 
     end
@@ -710,7 +720,6 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-
     @jlaunch(tend_x_kernel, state, dt,hy_dens_cell, hy_dens_theta_cell; output=(flux, tend))
 end
 
@@ -733,7 +742,6 @@ function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_pressure_int::Vector{Float64})
 
     @jlaunch(tend_z_kernel, state, dt, hy_dens_int, hy_dens_theta_int, hy_pressure_int; output=(flux, tend,))
-
 end
 
 function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},

@@ -52,10 +52,10 @@ MACROS := -D_NX=${NX} -D_NZ=${NZ} -D_SIM_TIME=${SIM_TIME} -D_OUT_FREQ=${OUT_FREQ
 F_FLAGS := ${INCLUDES} ${LIBS} ${MACROS}
 
 jai:
-	${JULIA} --color=yes -O -- ${JAISRC} ${ARGS} -a ${ACCEL_TYPE} 
+	${JULIA} --color=yes -- ${JAISRC} ${ARGS}
 
 julia:
-	${JULIA} --color=yes -O -- ${JLSRC} ${ARGS}
+	${JULIA} --color=yes -- ${JLSRC} ${ARGS}
 
 debug:
 	${JULIA} --color=yes --check-bounds=yes -O0 ${SRC} ${ARGS}

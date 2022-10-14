@@ -61,6 +61,10 @@ s = ArgParseSettings()
         help = "output frequency in time"
         arg_type = Float64
         default = 400.0
+    "--logfreq", "-l"
+        help = "logging frequency in time"
+        arg_type = Float64
+        default = 0.0
     "--dataspec", "-d"
         help = "data spec"
         arg_type = Int64
@@ -83,6 +87,8 @@ const SIM_TIME    = parsed_args["simtime"]
 const NX_GLOB     = parsed_args["nx"]
 const NZ_GLOB     = parsed_args["nz"]
 const OUT_FREQ    = parsed_args["outfreq"]
+const _logfreq    = parsed_args["logfreq"]
+const LOG_FREQ    = (_logfreq == 0.0) ? SIM_TIME / 10 : _logfreq
 const DATA_SPEC   = parsed_args["dataspec"]
 const OUTFILE     = parsed_args["outfile"]
 const WORKDIR     = parsed_args["workdir"]
@@ -162,6 +168,7 @@ function main(args::Vector{String})
 
     local etime = Float64(0.0)
     local output_counter = Float64(0.0)
+    local log_counter = Float64(0.0)
     local dt = DT
     local nt = Int(1)
 
@@ -193,6 +200,7 @@ function main(args::Vector{String})
         #Update the elapsed time and output counter
         etime = etime + dt
         output_counter = output_counter + dt
+        log_counter = log_counter + dt
 
         #If it's time for output, reset the counter, and do output
         if (output_counter >= OUT_FREQ)
@@ -202,9 +210,15 @@ function main(args::Vector{String})
           output_counter = output_counter - OUT_FREQ
         end
 
-    end
+        if MASTERPROC && (log_counter >= LOG_FREQ)
+          @printf("[%3.1f%% of %2.1f]\n", etime/SIM_TIME*100, SIM_TIME)
+          log_counter = log_counter - LOG_FREQ
+        end
 
+    end
+ 
     local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
+
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)

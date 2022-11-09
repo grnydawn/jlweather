@@ -35,14 +35,10 @@ import Libdl
 ##############
 # constants
 ##############
-   
-const FLOAT = Float64
-   
+    
 # julia command to link MPI.jl to system MPI installation
 # julia -e 'ENV["JULIA_MPI_BINARY"]="system"; ENV["JULIA_MPI_PATH"]="/Users/8yk/opt/usr/local"; using Pkg; Pkg.build("MPI"; verbose=true)'
-
 Init()
-
 const COMM   = COMM_WORLD
 const NRANKS = Comm_size(COMM)
 const MYRANK = Comm_rank(COMM)
@@ -51,7 +47,7 @@ s = ArgParseSettings()
 @add_arg_table! s begin
     "--simtime", "-s"
         help = "simulation time"
-        arg_type = FLOAT
+        arg_type = Float64
         default = 400.0
     "--nx", "-x"
         help = "x-dimension"
@@ -63,11 +59,11 @@ s = ArgParseSettings()
         default = 50
     "--outfreq", "-f"
         help = "output frequency in time"
-        arg_type = FLOAT
+        arg_type = Float64
         default = 400.0
     "--logfreq", "-l"
         help = "logging frequency in time"
-        arg_type = FLOAT
+        arg_type = Float64
         default = 0.0
     "--dataspec", "-d"
         help = "data spec"
@@ -98,7 +94,7 @@ const OUTFILE     = parsed_args["outfile"]
 const WORKDIR     = parsed_args["workdir"]
 const DEBUGDIR    = parsed_args["debugdir"]
 
-const NPER  = FLOAT(NX_GLOB)/NRANKS
+const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
 const I_END = trunc(Int, round(NPER*(MYRANK+1)))
 const NX    = I_END - I_BEG + 1
@@ -115,23 +111,23 @@ const MASTERPROC  = (MYRANK == MASTERRANK)
 const HS          = 2
 const STEN_SIZE   = 4 #Size of the stencil used for interpolation
 const NUM_VARS    = 4
-const XLEN        = FLOAT(2.E4) # Length of the domain in the x-direction (meters)
-const ZLEN        = FLOAT(1.E4) # Length of the domain in the z-direction (meters)
-const HV_BETA     = FLOAT(0.05) # How strong to diffuse the solution: hv_beta \in [0:1]
-const CFL         = FLOAT(1.5)  # "Courant, Friedrichs, Lewy" number (for numerical stability)
-const MAX_SPEED   = FLOAT(450.0)# Assumed maximum wave speed during the simulation (speed of sound + speed of wind) (meter / sec)
+const XLEN        = Float64(2.E4) # Length of the domain in the x-direction (meters)
+const ZLEN        = Float64(1.E4) # Length of the domain in the z-direction (meters)
+const HV_BETA     = Float64(0.05) # How strong to diffuse the solution: hv_beta \in [0:1]
+const CFL         = Float64(1.5)  # "Courant, Friedrichs, Lewy" number (for numerical stability)
+const MAX_SPEED   = Float64(450.0)# Assumed maximum wave speed during the simulation (speed of sound + speed of wind) (meter / sec)
 const DX          = XLEN / NX_GLOB
 const DZ          = ZLEN / NZ_GLOB
 const DT          = min(DX,DZ) / MAX_SPEED * CFL
 const NQPOINTS    = 3
-const PI          = FLOAT(3.14159265358979323846264338327)
-const GRAV        = FLOAT(9.8)
-const CP          = FLOAT(1004.0) # Specific heat of dry air at constant pressure
-const CV          = FLOAT(717.0)  # Specific heat of dry air at constant volume
-const RD          = FLOAT(287.0)  # Dry air constant for equation of state (P=rho*rd*T)
-const P0          = FLOAT(1.0E5)  # Standard pressure at the surface in Pascals
-const C0          = FLOAT(27.5629410929725921310572974482)
-const GAMMA       = FLOAT(1.40027894002789400278940027894)
+const PI          = Float64(3.14159265358979323846264338327)
+const GRAV        = Float64(9.8)
+const CP          = Float64(1004.0) # Specific heat of dry air at constant pressure
+const CV          = Float64(717.0)  # Specific heat of dry air at constant volume
+const RD          = Float64(287.0)  # Dry air constant for equation of state (P=rho*rd*T)
+const P0          = Float64(1.0E5)  # Standard pressure at the surface in Pascals
+const C0          = Float64(27.5629410929725921310572974482)
+const GAMMA       = Float64(1.40027894002789400278940027894)
 
 const ID_DENS     = 1
 const ID_UMOM     = 2
@@ -147,51 +143,9 @@ const DATA_SPEC_GRAVITY_WAVES   = 3
 const DATA_SPEC_DENSITY_CURRENT = 5
 const DATA_SPEC_INJECTION       = 6
 
-const qpoints     = Array{FLOAT}([0.112701665379258311482073460022E0 , 0.500000000000000000000000000000E0 , 0.887298334620741688517926539980E0])
-const qweights    = Array{FLOAT}([0.277777777777777777777777777779E0 , 0.444444444444444444444444444444E0 , 0.277777777777777777777777777779E0])
+const qpoints     = Array{Float64}([0.112701665379258311482073460022E0 , 0.500000000000000000000000000000E0 , 0.887298334620741688517926539980E0])
+const qweights    = Array{Float64}([0.277777777777777777777777777779E0 , 0.444444444444444444444444444444E0 , 0.277777777777777777777777777779E0])
 
- 
-##############
-# types
-##############
-
-struct VarsType{T <: FLOAT}
-    state :: OffsetArray{T, 3, Array{T, 3}}
-    statetmp :: OffsetArray{T, 3, Array{T, 3}}
-    flux :: Array{T, 3}
-    tend :: Array{T, 3}
-    hy_dens_cell :: OffsetVector{T, Vector{T}}
-    hy_dens_theta_cell :: OffsetVector{T, Vector{T}}
-    hy_dens_int::Vector{T}
-    hy_dens_theta_int::Vector{T}
-    hy_pressure_int::Vector{T}
-    recvbuf_l :: Array{T, 3}
-    recvbuf_r :: Array{T, 3}
-    sendbuf_l :: Array{T, 3}
-    sendbuf_r :: Array{T, 3}
-
-    function VarsType{T}(
-            _state :: OffsetArray{T, 3, Array{T, 3}},
-            _statetmp :: OffsetArray{T, 3, Array{T, 3}},
-            _flux :: Array{T, 3},
-            _tend :: Array{T, 3},
-            _hy_dens_cell :: OffsetVector{T, Vector{T}},
-            _hy_dens_theta_cell :: OffsetVector{T, Vector{T}},
-            _hy_dens_int :: Vector{T},
-            _hy_dens_theta_int :: Vector{T},
-            _hy_pressure_int :: Vector{T},
-            _recvbuf_l :: Array{T, 3},
-            _recvbuf_r :: Array{T, 3},
-            _sendbuf_l :: Array{T, 3},
-            _sendbuf_r :: Array{T, 3}
-        ) where T <: FLOAT
-
-        new(_state, _statetmp, _flux, _tend, _hy_dens_cell, _hy_dens_theta_cell,
-            _hy_dens_int, _hy_dens_theta_int, _hy_pressure_int,_recvbuf_l,
-            _recvbuf_r, _sendbuf_l, _sendbuf_r)
-    end    
-end
- 
 ##############
 # functions
 ##############
@@ -212,20 +166,22 @@ function main(args::Vector{String})
     # top-level variables
     ######################
 
-    local etime = FLOAT(0.0)
-    local output_counter = FLOAT(0.0)
-    local log_counter = FLOAT(0.0)
+    local etime = Float64(0.0)
+    local output_counter = Float64(0.0)
+    local log_counter = Float64(0.0)
     local dt = DT
     local nt = Int(1)
 
     #Initialize the grid and the data  
-    vars = init!()
+    (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
+            sendbuf_r, recvbuf_l, recvbuf_r) = init!()
 
     #Initial reductions for mass, kinetic energy, and total energy
-    local mass0, te0 = reductions(vars)
+    local mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
     #Output the initial state
-    output(vars,etime,nt)
+    output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
 
     
     # main loop
@@ -237,7 +193,9 @@ function main(args::Vector{String})
         end
 
         #Perform a single time step
-        perform_timestep!(vars, dt)
+        perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+                  sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+                  hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
         #Update the elapsed time and output counter
         etime = etime + dt
@@ -248,7 +206,7 @@ function main(args::Vector{String})
         if (output_counter >= OUT_FREQ)
           #Increment the number of outputs
           nt = nt + 1
-          output(vars, etime,nt)
+          output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
           output_counter = output_counter - OUT_FREQ
         end
 
@@ -259,14 +217,14 @@ function main(args::Vector{String})
 
     end
  
-    local mass, te = reductions(vars)
+    local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
     end
-    finalize!(vars)
+    finalize!(state)
 
 end
 
@@ -282,27 +240,27 @@ function init!()
     
     Barrier(COMM)
     
-    _state      = zeros(FLOAT, NX+2*HS, NZ+2*HS, NUM_VARS) 
+    _state      = zeros(Float64, NX+2*HS, NZ+2*HS, NUM_VARS) 
     state       = OffsetArray(_state, 1-HS:NX+HS, 1-HS:NZ+HS, 1:NUM_VARS)
-    _statetmp   = Array{FLOAT}(undef, NX+2*HS, NZ+2*HS, NUM_VARS) 
+    _statetmp   = Array{Float64}(undef, NX+2*HS, NZ+2*HS, NUM_VARS) 
     statetmp    = OffsetArray(_statetmp, 1-HS:NX+HS, 1-HS:NZ+HS, 1:NUM_VARS)
     
-    flux        = zeros(FLOAT, NX+1, NZ+1, NUM_VARS) 
-    tend        = zeros(FLOAT, NX, NZ, NUM_VARS) 
+    flux        = zeros(Float64, NX+1, NZ+1, NUM_VARS) 
+    tend        = zeros(Float64, NX, NZ, NUM_VARS) 
  
-    _hy_dens_cell       = zeros(FLOAT, NZ+2*HS) 
+    _hy_dens_cell       = zeros(Float64, NZ+2*HS) 
     hy_dens_cell        = OffsetArray(_hy_dens_cell, 1-HS:NZ+HS)
-    _hy_dens_theta_cell = zeros(FLOAT, NZ+2*HS) 
+    _hy_dens_theta_cell = zeros(Float64, NZ+2*HS) 
     hy_dens_theta_cell  = OffsetArray(_hy_dens_theta_cell, 1-HS:NZ+HS)   
     
-    hy_dens_int         = Array{FLOAT}(undef, NZ+1)
-    hy_dens_theta_int   = Array{FLOAT}(undef, NZ+1)
-    hy_pressure_int     = Array{FLOAT}(undef, NZ+1)   
+    hy_dens_int         = Array{Float64}(undef, NZ+1)
+    hy_dens_theta_int   = Array{Float64}(undef, NZ+1)
+    hy_pressure_int     = Array{Float64}(undef, NZ+1)   
     
-    sendbuf_l = Array{FLOAT}(undef, HS, NZ, NUM_VARS)
-    sendbuf_r = Array{FLOAT}(undef, HS, NZ, NUM_VARS)
-    recvbuf_l = Array{FLOAT}(undef, HS, NZ, NUM_VARS)
-    recvbuf_r = Array{FLOAT}(undef, HS, NZ, NUM_VARS)   
+    sendbuf_l = Array{Float64}(undef, HS, NZ, NUM_VARS)
+    sendbuf_r = Array{Float64}(undef, HS, NZ, NUM_VARS)
+    recvbuf_l = Array{Float64}(undef, HS, NZ, NUM_VARS)
+    recvbuf_r = Array{Float64}(undef, HS, NZ, NUM_VARS)   
     
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     #! Initialize the cell-averaged fluid state via Gauss-Legendre quadrature
@@ -367,67 +325,64 @@ function init!()
         hy_dens_theta_int[k] = hr*ht
         hy_pressure_int[k] = C0*(hr*ht)^GAMMA
     end
-
-    vars = VarsType{FLOAT}(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
+    
+    return (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
             sendbuf_r, recvbuf_l, recvbuf_r)
-    #println("EEEEE", methods(VarsType{FLOAT}))
-
-    return vars
 end
 
-function injection!(x::FLOAT, z::FLOAT)
+function injection!(x::Float64, z::Float64)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
 
-    r  = FLOAT(0.0) # Density
-    t  = FLOAT(0.0) # Potential temperature
-    u  = FLOAT(0.0) # Uwind
-    w  = FLOAT(0.0) # Wwind
+    r  = Float64(0.0) # Density
+    t  = Float64(0.0) # Potential temperature
+    u  = Float64(0.0) # Uwind
+    w  = Float64(0.0) # Wwind
     
     return r, u, w, t, hr, ht
 end
 
-function density_current!(x::FLOAT, z::FLOAT)
+function density_current!(x::Float64, z::Float64)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
 
-    r  = FLOAT(0.0) # Density
-    t  = FLOAT(0.0) # Potential temperature
-    u  = FLOAT(0.0) # Uwind
-    w  = FLOAT(0.0) # Wwind
+    r  = Float64(0.0) # Density
+    t  = Float64(0.0) # Potential temperature
+    u  = Float64(0.0) # Uwind
+    w  = Float64(0.0) # Wwind
     
     t = t + sample_ellipse_cosine!(x,z,-20.0,XLEN/2,5000.0,4000.0,2000.0)
 
     return r, u, w, t, hr, ht
 end
 
-function gravity_waves!(x::FLOAT, z::FLOAT)
+function gravity_waves!(x::Float64, z::Float64)
 
     #Hydrostatic density and potential temperature
-    hr,ht = hydro_const_bvfreq!(z, FLOAT(0.02))
+    hr,ht = hydro_const_bvfreq!(z, Float64(0.02))
 
-    r  = FLOAT(0.0) # Density
-    t  = FLOAT(0.0) # Potential temperature
-    u  = FLOAT(15.0) # Uwind
-    w  = FLOAT(0.0) # Wwind
+    r  = Float64(0.0) # Density
+    t  = Float64(0.0) # Potential temperature
+    u  = Float64(15.0) # Uwind
+    w  = Float64(0.0) # Wwind
     
     return r, u, w, t, hr, ht
 end
 
 
 #Rising thermal
-function thermal!(x::FLOAT, z::FLOAT)
+function thermal!(x::Float64, z::Float64)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
 
-    r  = FLOAT(0.0) # Density
-    t  = FLOAT(0.0) # Potential temperature
-    u  = FLOAT(0.0) # Uwind
-    w  = FLOAT(0.0) # Wwind
+    r  = Float64(0.0) # Density
+    t  = Float64(0.0) # Potential temperature
+    u  = Float64(0.0) # Uwind
+    w  = Float64(0.0) # Wwind
     
     t = t + sample_ellipse_cosine!(x,z,3.0,XLEN/2,2000.0,2000.0,2000.0) 
 
@@ -435,15 +390,15 @@ function thermal!(x::FLOAT, z::FLOAT)
 end
 
 #Colliding thermals
-function collision!(x::FLOAT, z::FLOAT)
+function collision!(x::Float64, z::Float64)
     
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
 
-    r  = FLOAT(0.0) # Density
-    t  = FLOAT(0.0) # Potential temperature
-    u  = FLOAT(0.0) # Uwind
-    w  = FLOAT(0.0) # Wwind
+    r  = Float64(0.0) # Density
+    t  = Float64(0.0) # Potential temperature
+    u  = Float64(0.0) # Uwind
+    w  = Float64(0.0) # Wwind
 
     t = t + sample_ellipse_cosine!(x,z, 20.0,XLEN/2,2000.0,2000.0,2000.0)
     t = t + sample_ellipse_cosine!(x,z,-20.0,XLEN/2,8000.0,2000.0,2000.0)
@@ -452,35 +407,35 @@ function collision!(x::FLOAT, z::FLOAT)
 end
 
 #Establish hydrstatic balance using constant potential temperature (thermally neutral atmosphere)
-function hydro_const_theta!(z::FLOAT)
+function hydro_const_theta!(z::Float64)
 
-    r      = FLOAT(0.0) # Density
-    t      = FLOAT(0.0) # Potential temperature
+    r      = Float64(0.0) # Density
+    t      = Float64(0.0) # Potential temperature
 
-    theta0 = FLOAT(300.0) # Background potential temperature
-    exner0 = FLOAT(1.0)   # Surface-level Exner pressure
+    theta0 = Float64(300.0) # Background potential temperature
+    exner0 = Float64(1.0)   # Surface-level Exner pressure
 
     t      = theta0                            # Potential temperature at z
     exner  = exner0 - GRAV * z / (CP * theta0) # Exner pressure at z
     p      = P0 * exner^(CP/RD)                # Pressure at z
-    rt     = (p / C0)^(FLOAT(1.0)/GAMMA)     # rho*theta at z
+    rt     = (p / C0)^(Float64(1.0)/GAMMA)     # rho*theta at z
     r      = rt / t                            # Density at z
 
     return r, t
 end
 
-function hydro_const_bvfreq!(z::FLOAT, bv_freq0::FLOAT)
+function hydro_const_bvfreq!(z::Float64, bv_freq0::Float64)
 
-    r      = FLOAT(0.0) # Density
-    t      = FLOAT(0.0) # Potential temperature
+    r      = Float64(0.0) # Density
+    t      = Float64(0.0) # Potential temperature
 
-    theta0 = FLOAT(300.0) # Background potential temperature
-    exner0 = FLOAT(1.0)   # Surface-level Exner pressure
+    theta0 = Float64(300.0) # Background potential temperature
+    exner0 = Float64(1.0)   # Surface-level Exner pressure
 
-    t      = theta0 * exp(bv_freq0^FLOAT(2.0) / GRAV * z) # Potential temperature at z
-    exner  = exner0 - GRAV^FLOAT(2.0) / (CP * bv_freq0^FLOAT(2.0)) * (t - theta0) / (t * theta0) # Exner pressure at z
+    t      = theta0 * exp(bv_freq0^Float64(2.0) / GRAV * z) # Potential temperature at z
+    exner  = exner0 - GRAV^Float64(2.0) / (CP * bv_freq0^Float64(2.0)) * (t - theta0) / (t * theta0) # Exner pressure at z
     p      = P0 * exner^(CP/RD)                # Pressure at z
-    rt     = (p / C0)^(FLOAT(1.0)/GAMMA)     # rho*theta at z
+    rt     = (p / C0)^(Float64(1.0)/GAMMA)     # rho*theta at z
     r      = rt / t                            # Density at z
 
     return r, t
@@ -488,18 +443,18 @@ end
 
 
 #Sample from an ellipse of a specified center, radius, and amplitude at a specified location
-function sample_ellipse_cosine!(   x::FLOAT,    z::FLOAT, amp::FLOAT, 
-                                  x0::FLOAT,   z0::FLOAT, 
-                                xrad::FLOAT, zrad::FLOAT )
+function sample_ellipse_cosine!(   x::Float64,    z::Float64, amp::Float64, 
+                                  x0::Float64,   z0::Float64, 
+                                xrad::Float64, zrad::Float64 )
 
     #Compute distance from bubble center
-    local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * PI / FLOAT(2.0)
+    local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * PI / Float64(2.0)
  
     #If the distance from bubble center is less than the radius, create a cos**2 profile
-    if (dist <= PI / FLOAT(2.0) ) 
+    if (dist <= PI / Float64(2.0) ) 
       val = amp * cos(dist)^2
     else
-      val = FLOAT(0.0)
+      val = Float64(0.0)
     end
     
     return val
@@ -512,77 +467,78 @@ end
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-function perform_timestep!(vars::VarsType{FLOAT}, dt::FLOAT)
+function perform_timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                   statetmp::OffsetArray{Float64, 3, Array{Float64, 3}},
+                   flux::Array{Float64, 3},
+                   tend::Array{Float64, 3},
+                   dt::Float64,
+                   recvbuf_l::Array{Float64, 3},
+                   recvbuf_r::Array{Float64, 3},
+                   sendbuf_l::Array{Float64, 3},
+                   sendbuf_r::Array{Float64, 3},
+                   hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                   hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}},
+                   hy_dens_int::Vector{Float64},
+                   hy_dens_theta_int::Vector{Float64},
+                   hy_pressure_int::Vector{Float64})
     
     local direction_switch = true
     
     if direction_switch
         
         #x-direction first
-        semi_discrete_step!(vars.state , vars.state    , vars.statetmp , dt / 3 , DIR_X ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , state    , statetmp , dt / 3 , DIR_X , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.statetmp , dt / 2 , DIR_X ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , statetmp , dt / 2 , DIR_X , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.state    , dt / 1 , DIR_X ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , state    , dt / 1 , DIR_X , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
         #z-direction second
-        semi_discrete_step!(vars.state , vars.state    , vars.statetmp , dt / 3 , DIR_Z ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , state    , statetmp , dt / 3 , DIR_Z , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.statetmp , dt / 2 , DIR_Z ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , statetmp , dt / 2 , DIR_Z , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.state    , dt / 1 , DIR_Z ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , state    , dt / 1 , DIR_Z , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     else
         
         #z-direction second
-        semi_discrete_step!(vars.state , vars.state    , vars.statetmp , dt / 3 , DIR_Z ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , state    , statetmp , dt / 3 , DIR_Z , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.statetmp , dt / 2 , DIR_Z ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , statetmp , dt / 2 , DIR_Z , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.state    , dt / 1 , DIR_Z ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , state    , dt / 1 , DIR_Z , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
         #x-direction first
-        semi_discrete_step!(vars.state , vars.state    , vars.statetmp , dt / 3 , DIR_X ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , state    , statetmp , dt / 3 , DIR_X , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.statetmp , dt / 2 , DIR_X ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , statetmp , dt / 2 , DIR_X , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
-        semi_discrete_step!(vars.state , vars.statetmp , vars.state    , dt / 1 , DIR_X ,
-            vars.flux , vars.tend, vars.recvbuf_l, vars.recvbuf_r, vars.sendbuf_l,
-            vars.sendbuf_r, vars.hy_dens_cell, vars.hy_dens_theta_cell,
-            vars.hy_dens_int, vars.hy_dens_theta_int, vars.hy_pressure_int)
+        semi_discrete_step!(state , statetmp , state    , dt / 1 , DIR_X , flux , tend,
+            recvbuf_l, recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+            hy_dens_int, hy_dens_theta_int, hy_pressure_int)
     end
 
 end
@@ -591,22 +547,22 @@ end
 #Perform a single semi-discretized step in time with the form:
 #state_out = state_init + dt * rhs(state_forcing)
 #Meaning the step starts from state_init, computes the rhs using state_forcing, and stores the result in state_out
-function semi_discrete_step!(state_init::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    state_forcing::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    state_out::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    dt::FLOAT,
+function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_forcing::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    state_out::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    dt::Float64,
                     dir::Int,
-                    flux::Array{FLOAT, 3},
-                    tend::Array{FLOAT, 3},
-                    recvbuf_l::Array{FLOAT, 3},
-                    recvbuf_r::Array{FLOAT, 3},
-                    sendbuf_l::Array{FLOAT, 3},
-                    sendbuf_r::Array{FLOAT, 3},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_int::Vector{FLOAT},
-                    hy_dens_theta_int::Vector{FLOAT},
-                    hy_pressure_int::Vector{FLOAT})
+                    flux::Array{Float64, 3},
+                    tend::Array{Float64, 3},
+                    recvbuf_l::Array{Float64, 3},
+                    recvbuf_r::Array{Float64, 3},
+                    sendbuf_l::Array{Float64, 3},
+                    sendbuf_r::Array{Float64, 3},
+                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_int::Vector{Float64},
+                    hy_dens_theta_int::Vector{Float64},
+                    hy_pressure_int::Vector{Float64})
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
@@ -632,23 +588,23 @@ function semi_discrete_step!(state_init::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
         for k in 1:NZ
             for i in 1:NX
                 if DATA_SPEC == DATA_SPEC_GRAVITY_WAVES
-                    x = (I_BEG-1 + i-FLOAT(0.5)) * DX
-                    z = (K_BEG-1 + k-FLOAT(0.5)) * DZ
+                    x = (I_BEG-1 + i-Float64(0.5)) * DX
+                    z = (K_BEG-1 + k-Float64(0.5)) * DZ
                     # The following requires "acc routine" in OpenACC and "declare target" in OpenMP offload
                     # Neither of these are particularly well supported by compilers, so I'm manually inlining
                     # wpert = sample_ellipse_cosine( x,z , 0.01_rp , xlen/8,1000._rp, 500._rp,500._rp )
-                    x0 = XLEN/FLOAT(8.)
-                    z0 = FLOAT(1000.0)
-                    xrad = FLOAT(500.)
-                    zrad = FLOAT(500.)
-                    amp = FLOAT(0.01)
+                    x0 = XLEN/Float64(8.)
+                    z0 = Float64(1000.0)
+                    xrad = Float64(500.)
+                    zrad = Float64(500.)
+                    amp = Float64(0.01)
                     #Compute distance from bubble center
-                    dist = sqrt( ((x-x0)/xrad)^FLOAT(2.0) + ((z-z0)/zrad)^FLOAT(2.0) ) * PI / FLOAT(2.0)
+                    dist = sqrt( ((x-x0)/xrad)^Float64(2.0) + ((z-z0)/zrad)^Float64(2.0) ) * PI / Float64(2.0)
                     #If the distance from bubble center is less than the radius, create a cos**2 profile
-                    if dist <= PI / FLOAT(2.0)
-                        wpert = amp * cos(dist)^FLOAT(2.0)
+                    if dist <= PI / Float64(2.0)
+                        wpert = amp * cos(dist)^Float64(2.0)
                     else
-                        wpert = FLOAT(0.0)
+                        wpert = Float64(0.0)
                     end
                     tend[i,k,ID_WMOM] = tend[i,k,ID_WMOM] + wpert*hy_dens_cell[k]
                 end
@@ -661,13 +617,13 @@ function semi_discrete_step!(state_init::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI
-function set_halo_values_x!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    recvbuf_l::Array{FLOAT, 3},
-                    recvbuf_r::Array{FLOAT, 3},
-                    sendbuf_l::Array{FLOAT, 3},
-                    sendbuf_r::Array{FLOAT, 3},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    recvbuf_l::Array{Float64, 3},
+                    recvbuf_r::Array{Float64, 3},
+                    sendbuf_l::Array{Float64, 3},
+                    sendbuf_r::Array{Float64, 3},
+                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
     if NRANKS == 1
         for ll in 1:NUM_VARS
@@ -734,17 +690,17 @@ function set_halo_values_x!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
  
 end
 
-function compute_tendencies_x!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    flux::Array{FLOAT, 3},
-                    tend::Array{FLOAT, 3},
-                    dt::FLOAT,
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    flux::Array{Float64, 3},
+                    tend::Array{Float64, 3},
+                    dt::Float64,
+                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    local stencil = Array{FLOAT}(undef, STEN_SIZE)
-    local d3_vals = Array{FLOAT}(undef, NUM_VARS)
-    local vals    = Array{FLOAT}(undef, NUM_VARS)
-    local (r, u, w, t, p) = [zero(FLOAT) for _ in 1:5]
+    local stencil = Array{Float64}(undef, STEN_SIZE)
+    local d3_vals = Array{Float64}(undef, NUM_VARS)
+    local vals    = Array{Float64}(undef, NUM_VARS)
+    local (r, u, w, t, p) = [zero(Float64) for _ in 1:5]
     
     #Compute the hyperviscosity coeficient
     local hv_coef = -HV_BETA * DX / (16*dt)
@@ -790,9 +746,9 @@ end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI
 #decomposition in the vertical direction
-function set_halo_values_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function set_halo_values_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
     for ll in 1:NUM_VARS
         for i in 1-HS:NX+HS
@@ -817,18 +773,18 @@ function set_halo_values_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 
 end
         
-function compute_tendencies_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    flux::Array{FLOAT, 3},
-                    tend::Array{FLOAT, 3},
-                    dt::FLOAT,
-                    hy_dens_int::Vector{FLOAT},
-                    hy_dens_theta_int::Vector{FLOAT},
-                    hy_pressure_int::Vector{FLOAT})
+function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    flux::Array{Float64, 3},
+                    tend::Array{Float64, 3},
+                    dt::Float64,
+                    hy_dens_int::Vector{Float64},
+                    hy_dens_theta_int::Vector{Float64},
+                    hy_pressure_int::Vector{Float64})
     
-    local stencil = Array{FLOAT}(undef, STEN_SIZE)
-    local d3_vals = Array{FLOAT}(undef, NUM_VARS)
-    local vals    = Array{FLOAT}(undef, NUM_VARS)
-    local (r, u, w, t, p) = [zero(FLOAT) for _ in 1:5]
+    local stencil = Array{Float64}(undef, STEN_SIZE)
+    local d3_vals = Array{Float64}(undef, NUM_VARS)
+    local vals    = Array{Float64}(undef, NUM_VARS)
+    local (r, u, w, t, p) = [zero(Float64) for _ in 1:5]
  
     #Compute the hyperviscosity coeficient
     local hv_coef = -HV_BETA * DZ / (16*dt)
@@ -882,17 +838,19 @@ function compute_tendencies_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 
 end
 
-function reductions(vars::VarsType{FLOAT})
+function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
-    local mass, te, r, u, w, th, p, t, ke, le = [zero(FLOAT) for _ in 1:10] 
-    glob = Array{FLOAT}(undef, 2)
+    local mass, te, r, u, w, th, p, t, ke, le = [zero(Float64) for _ in 1:10] 
+    glob = Array{Float64}(undef, 2)
     
     for k in 1:NZ
         for i in 1:NX
-            r  =   vars.state[i,k,ID_DENS] + vars.hy_dens_cell[k]             # Density
-            u  =   vars.state[i,k,ID_UMOM] / r                           # U-wind
-            w  =   vars.state[i,k,ID_WMOM] / r                           # W-wind
-            th = ( vars.state[i,k,ID_RHOT] + vars.hy_dens_theta_cell[k] ) / r # Potential Temperature (theta)
+            r  =   state[i,k,ID_DENS] + hy_dens_cell[k]             # Density
+            u  =   state[i,k,ID_UMOM] / r                           # U-wind
+            w  =   state[i,k,ID_WMOM] / r                           # W-wind
+            th = ( state[i,k,ID_RHOT] + hy_dens_theta_cell[k] ) / r # Potential Temperature (theta)
             p  = C0*(r*th)^GAMMA      # Pressure
             t  = th / (P0/p)^(RD/CP)  # Temperature
             ke = r*(u*u+w*w)          # Kinetic Energy
@@ -902,31 +860,31 @@ function reductions(vars::VarsType{FLOAT})
         end
     end
     
-    Allreduce!(Array{FLOAT}([mass,te]), glob, +, COMM)
+    Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
     
     return glob
 end
 
 #Output the fluid state (state) to a NetCDF file at a given elapsed model time (etime)
-function output(vars::VarsType{FLOAT},
-                etime::FLOAT,
-                nt::Int)
+function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+                etime::Float64,
+                nt::Int,
+                hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+                hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    var_local  = zeros(FLOAT, NX, NZ, NUM_VARS)
+    var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 
     if MASTERPROC
-       var_global  = zeros(FLOAT, NX_GLOB, NZ_GLOB, NUM_VARS)
+       var_global  = zeros(Float64, NX_GLOB, NZ_GLOB, NUM_VARS)
     end
 
     #Store perturbed values in the temp arrays for output
     for k in 1:NZ
         for i in 1:NX
-            var_local[i,k,ID_DENS]  = vars.state[i,k,ID_DENS]
-            var_local[i,k,ID_UMOM]  = vars.state[i,k,ID_UMOM] / ( vars.hy_dens_cell[k] + vars.state[i,k,ID_DENS] )
-            var_local[i,k,ID_WMOM]  = vars.state[i,k,ID_WMOM] / ( vars.hy_dens_cell[k] + vars.state[i,k,ID_DENS] )
-            var_local[i,k,ID_RHOT] = (( vars.state[i,k,ID_RHOT] + vars.hy_dens_theta_cell[k] ) /
-                                      ( vars.hy_dens_cell[k] + vars.state[i,k,ID_DENS] ) -
-                                      vars.hy_dens_theta_cell[k] / vars.hy_dens_cell[k])
+            var_local[i,k,ID_DENS]  = state[i,k,ID_DENS]
+            var_local[i,k,ID_UMOM]  = state[i,k,ID_UMOM] / ( hy_dens_cell[k] + state[i,k,ID_DENS] )
+            var_local[i,k,ID_WMOM]  = state[i,k,ID_WMOM] / ( hy_dens_cell[k] + state[i,k,ID_DENS] )
+            var_local[i,k,ID_RHOT] = ( state[i,k,ID_RHOT] + hy_dens_theta_cell[k] ) / ( hy_dens_cell[k] + state[i,k,ID_DENS] ) - hy_dens_theta_cell[k] / hy_dens_cell[k]
         end
     end
 
@@ -948,7 +906,7 @@ function output(vars::VarsType{FLOAT},
        var_global[I_BEG:I_END,:,:] = var_local[:,:,:]
        if NRANKS > 1
           for i in 2:NRANKS
-              var_local = Array{FLOAT}(undef, nchunk[i],NZ,NUM_VARS)
+              var_local = Array{Float64}(undef, nchunk[i],NZ,NUM_VARS)
               status = Recv!(var_local,i-1,0,COMM)
               var_global[ibeg_chunk[i]:iend_chunk[i],:,:] = var_local[:,:,:]
           end
@@ -970,15 +928,15 @@ function output(vars::VarsType{FLOAT},
           defDim(ds,"x",NX_GLOB)
           defDim(ds,"z",NZ_GLOB)
 
-          nc_var = defVar(ds,"t",FLOAT,("t",))
+          nc_var = defVar(ds,"t",Float64,("t",))
           nc_var[nt] = etime
-          nc_var = defVar(ds,"dens",FLOAT,("x","z","t"))
+          nc_var = defVar(ds,"dens",Float64,("x","z","t"))
           nc_var[:,:,nt] = var_global[:,:,ID_DENS]
-          nc_var = defVar(ds,"uwnd",FLOAT,("x","z","t"))
+          nc_var = defVar(ds,"uwnd",Float64,("x","z","t"))
           nc_var[:,:,nt] = var_global[:,:,ID_UMOM]
-          nc_var = defVar(ds,"wwnd",FLOAT,("x","z","t"))
+          nc_var = defVar(ds,"wwnd",Float64,("x","z","t"))
           nc_var[:,:,nt] = var_global[:,:,ID_WMOM]
-          nc_var = defVar(ds,"theta",FLOAT,("x","z","t"))
+          nc_var = defVar(ds,"theta",Float64,("x","z","t"))
           nc_var[:,:,nt] = var_global[:,:,ID_RHOT]
 
           # Close NetCDF file
@@ -1007,7 +965,7 @@ function output(vars::VarsType{FLOAT},
     end # MASTER
 end
 
-function finalize!(vars::VarsType{FLOAT})
+function finalize!(state::OffsetArray{Float64, 3, Array{Float64, 3}})
 
     #println(axes(state))
     

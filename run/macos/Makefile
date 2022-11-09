@@ -3,8 +3,8 @@
 SIM_TIME := 100.0
 OUT_FREQ := 100.0
 #SIM_TIME := 100.0
-NX := 100
-NZ := 50
+NX := 200
+NZ := 100
 #SIM_TIME := 10.0 #10.0
 #OUT_FREQ := 10.0 # 10.0
 #NX := 6400 # 640 
@@ -29,6 +29,7 @@ JULIA := julia --project=.
 SRCDIR :=../../src
 JAISRC := ${SRCDIR}/jai/miniWeather_accel.jl
 JLSRC := ${SRCDIR}/julia/miniWeather_mpi.jl
+JLORGSRC := ${SRCDIR}/julia/miniWeather_mpi_org.jl
 FORTSRC := ${SRCDIR}/fortran/miniWeather_mpi.F90
 FORTACCSRC := ${SRCDIR}/fortran/miniWeather_mpi_openacc.F90
 FORTOMPSRC := ${SRCDIR}/fortran/miniWeather_mpi_openmp45.F90
@@ -54,6 +55,7 @@ jai:
 
 julia:
 	${JULIA} --color=yes -- ${JLSRC} ${ARGS}
+	${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
 
 debug:
 	${JULIA} --color=yes --check-bounds=yes -O0 ${SRC} ${ARGS}

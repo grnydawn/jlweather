@@ -3,8 +3,8 @@
 SIM_TIME := 100.0
 OUT_FREQ := 100.0
 #SIM_TIME := 100.0
-NX := 200
-NZ := 100
+NX := 400
+NZ := 200
 #SIM_TIME := 10.0 #10.0
 #OUT_FREQ := 10.0 # 10.0
 #NX := 6400 # 640 
@@ -55,7 +55,7 @@ jai:
 
 julia:
 	${JULIA} --color=yes -- ${JLSRC} ${ARGS}
-	${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
 
 debug:
 	${JULIA} --color=yes --check-bounds=yes -O0 ${SRC} ${ARGS}

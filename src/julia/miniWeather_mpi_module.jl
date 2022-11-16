@@ -1,9 +1,6 @@
 using AccelInterfaces
 
 import Profile
-import TimerOutputs.TimerOutput,
-       TimerOutputs.@timeit,
-       TimerOutputs.show
 
 import OffsetArrays.OffsetArray,
        OffsetArrays.OffsetVector
@@ -149,8 +146,6 @@ const DATA_SPEC_INJECTION       = 6
 const qpoints     = Array{Float64}([0.112701665379258311482073460022E0 , 0.500000000000000000000000000000E0 , 0.887298334620741688517926539980E0])
 const qweights    = Array{Float64}([0.277777777777777777777777777779E0 , 0.444444444444444444444444444444E0 , 0.277777777777777777777777777779E0])
 
-const to = TimerOutput()
-
 ##############
 # functions
 ##############
@@ -166,6 +161,8 @@ julia> main()
 ```
 """
 function main(args::Vector{String})
+
+    using vars
 
     ######################
     # top-level variables
@@ -198,7 +195,7 @@ function main(args::Vector{String})
         end
 
         #Perform a single time step
-        @timeit to "timestep" perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+        perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
                   sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
                   hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
@@ -228,7 +225,6 @@ function main(args::Vector{String})
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
-        show(to); println("")
     end
     finalize!(state)
 
@@ -572,25 +568,25 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
-        @timeit to "halo_x" set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
+        set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
                            sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
         #Compute the time tendencies for the fluid state in the x-direction
-        @timeit to "tend_x" compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
+        compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
 
         
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
-        @timeit to "halo_z" set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
+        set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
         
         #Compute the time tendencies for the fluid state in the z-direction
-        @timeit to "tend_z" compute_tendencies_z!(state_forcing,flux,tend,dt,
+        compute_tendencies_z!(state_forcing,flux,tend,dt,
                     hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
   
     #Apply the tendencies to the fluid state
-    @timeit to "update" for ll in 1:NUM_VARS
+    for ll in 1:NUM_VARS
         for k in 1:NZ
             for i in 1:NX
                 if DATA_SPEC == DATA_SPEC_GRAVITY_WAVES

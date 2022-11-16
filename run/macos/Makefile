@@ -28,7 +28,10 @@ JULIA := julia --project=.
 
 SRCDIR :=../../src
 JAISRC := ${SRCDIR}/jai/miniWeather_accel.jl
-JLSRC := ${SRCDIR}/julia/miniWeather_mpi.jl
+JLCONSTSRC := ${SRCDIR}/julia/miniWeather_mpi_const.jl
+JLGLOBALSSRC := ${SRCDIR}/julia/miniWeather_mpi_globals.jl
+JLMODULESRC := ${SRCDIR}/julia/miniWeather_mpi_module.jl
+JLSTRUCTSRC := ${SRCDIR}/julia/miniWeather_mpi_struct.jl
 JLORGSRC := ${SRCDIR}/julia/miniWeather_mpi_org.jl
 FORTSRC := ${SRCDIR}/fortran/miniWeather_mpi.F90
 FORTACCSRC := ${SRCDIR}/fortran/miniWeather_mpi_openacc.F90
@@ -54,8 +57,11 @@ jai:
 	${JULIA} --color=yes -- ${JAISRC} ${ARGS}
 
 julia:
-	${JULIA} --color=yes -- ${JLSRC} ${ARGS}
-	#${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JLCONSTSRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JLGLOBALSSRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JLMODULESRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JLSTRUCTSRC} ${ARGS}
+	${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
 
 debug:
 	${JULIA} --color=yes --check-bounds=yes -O0 ${SRC} ${ARGS}

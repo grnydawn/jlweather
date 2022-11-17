@@ -10,12 +10,11 @@ import MPI.Waitall!,
 import OffsetArrays.OffsetArray,
        OffsetArrays.OffsetVector
 
-using ..Constants: COMM, NRANKS, MYRANK, DATA_SPEC
+using ..Constants: COMM, NRANKS, MYRANK, DATA_SPEC, DATA_SPEC_GRAVITY_WAVES
 using ..Constants: I_BEG, NX, NZ, LEFT_RANK, RIGHT_RANK
 using ..Constants: K_BEG, HS, STEN_SIZE, NUM_VARS, XLEN, ZLEN, HV_BETA
 using ..Constants: CFL, MAX_SPEED, DX, DZ, DT, NQPOINTS, PI, GRAV, CP, CV, RD, P0, C0, GAMMA
 using ..Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, DIR_X, DIR_Z
-using ..Constants: DATA_SPEC_GRAVITY_WAVES
 using ..Constants: FLOAT, INTEGER, DATA_SPEC_INJECTION
 
 using ..Variables: state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell
@@ -29,20 +28,7 @@ using ..Variables: sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-function perform_timestep!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                   statetmp::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                   flux::Array{FLOAT, 3},
-                   tend::Array{FLOAT, 3},
-                   dt::FLOAT,
-                   recvbuf_l::Array{FLOAT, 3},
-                   recvbuf_r::Array{FLOAT, 3},
-                   sendbuf_l::Array{FLOAT, 3},
-                   sendbuf_r::Array{FLOAT, 3},
-                   hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                   hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                   hy_dens_int::Vector{FLOAT},
-                   hy_dens_theta_int::Vector{FLOAT},
-                   hy_pressure_int::Vector{FLOAT})
+function perform_timestep!(dt::FLOAT)
     
     local direction_switch = true
     

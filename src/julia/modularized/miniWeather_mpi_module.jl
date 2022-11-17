@@ -21,19 +21,15 @@ Init()
 
 include("constants.jl")
 
-using .Constants: COMM, NRANKS, MYRANK, SIM_TIME, NX_GLOB, NZ_GLOB, OUT_FREQ, LOG_FREQ, DATA_SPEC
-using .Constants: OUTFILE, WORKDIR, DEBUGDIR, NPER, I_BEG, I_END, NX, NZ, LEFT_RANK, RIGHT_RANK
-using .Constants: K_BEG, MASTERRANK, MASTERPROC, HS, STEN_SIZE, NUM_VARS, XLEN, ZLEN, HV_BETA
-using .Constants: CFL, MAX_SPEED, DX, DZ, DT, NQPOINTS, PI, GRAV, CP, CV, RD, P0, C0, GAMMA
-using .Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, DIR_X, DIR_Z, DATA_SPEC_COLLISION
-using .Constants: DATA_SPEC_THERMAL, DATA_SPEC_GRAVITY_WAVES, DATA_SPEC_DENSITY_CURRENT
-using .Constants: FLOAT, INTEGER, DATA_SPEC_INJECTION, qpoints, qweights
+using .Constants: COMM, NRANKS, SIM_TIME, NX_GLOB, NZ_GLOB, OUT_FREQ, LOG_FREQ
+using .Constants: FLOAT, INTEGER, OUTFILE, NPER, I_BEG, I_END, NX, NZ
+using .Constants: MASTERRANK, MASTERPROC, NUM_VARS
+using .Constants: DX, DZ, DT, NQPOINTS, PI, GRAV, CP, CV, RD, P0, C0, GAMMA
+using .Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT
 
 include("variables.jl")
 
-using .Variables: state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell
-using .Variables: hy_dens_int, hy_dens_theta_int, hy_pressure_int
-using .Variables: sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
+using .Variables: state, hy_dens_cell, hy_dens_theta_cell, etime
 
 include("timestep.jl")
 using .Timestep: perform_timestep!
@@ -67,8 +63,6 @@ function main()
         println("dt: $DT")
     end
         
-    #println("nx, nz at $MYRANK: $NX($I_BEG:$I_END) $NZ($K_BEG:$NZ)")
-    
     Barrier(COMM)
 
     #Initial reductions for mass, kinetic energy, and total energy
@@ -86,9 +80,7 @@ function main()
         end
 
         #Perform a single time step
-        @timeit etime "timestep" perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-                  sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
-                  hy_dens_int, hy_dens_theta_int, hy_pressure_int)
+        @timeit etime "timestep" perform_timestep!(dt)
 
         #Update the elapsed time and output counter
         stime = stime + dt
@@ -118,7 +110,6 @@ function main()
         @printf("d_te  : %.15e\n", (te - te0)/te0)
         show(etime); println("")
     end
-    finalize!(state)
 
 end
 
@@ -247,12 +238,6 @@ function output(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 
        end # etime
     end # MASTER
-end
-
-function finalize!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}})
-
-    #println(axes(state))
-    
 end
 
 # invoke main function

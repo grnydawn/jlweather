@@ -29,7 +29,9 @@ using .Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT
 
 include("variables.jl")
 
-using .Variables: state, hy_dens_cell, hy_dens_theta_cell, etime
+using .Variables: state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell
+using .Variables: hy_dens_int, hy_dens_theta_int, hy_pressure_int
+using .Variables: sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
 
 include("timestep.jl")
 using .Timestep: perform_timestep!
@@ -80,7 +82,9 @@ function main()
         end
 
         #Perform a single time step
-        @timeit etime "timestep" perform_timestep!(dt)
+        @timeit etime "timestep" perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+                  sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+                  hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
         #Update the elapsed time and output counter
         stime = stime + dt
@@ -113,9 +117,7 @@ function main()
 
 end
 
-function reductions(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function reductions(state, hy_dens_cell, hy_dens_theta_cell)
     
     local mass, te, r, u, w, th, p, t, ke, le = [zero(FLOAT) for _ in 1:10] 
     glob = Array{FLOAT}(undef, 2)
@@ -141,11 +143,7 @@ function reductions(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 end
 
 #Output the fluid state (state) to a NetCDF file at a given elapsed model time (etime)
-function output(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                stime::FLOAT,
-                nt::INTEGER,
-                hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function output(state, stime, nt, hy_dens_cell, hy_dens_theta_cell)
 
     var_local  = zeros(FLOAT, NX, NZ, NUM_VARS)
 

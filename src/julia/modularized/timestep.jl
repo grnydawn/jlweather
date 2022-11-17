@@ -17,9 +17,7 @@ using ..Constants: CFL, MAX_SPEED, DX, DZ, DT, NQPOINTS, PI, GRAV, CP, CV, RD, P
 using ..Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, DIR_X, DIR_Z
 using ..Constants: FLOAT, INTEGER, DATA_SPEC_INJECTION
 
-using ..Variables: state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell
-using ..Variables: hy_dens_int, hy_dens_theta_int, hy_pressure_int
-using ..Variables: sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
+using ..Variables: etime
 
 #Performs a single dimensionally split time step using a simple low-storate three-stage Runge-Kutta time integrator
 #The dimensional splitting is a second-order-accurate alternating Strang splitting in which the
@@ -28,7 +26,25 @@ using ..Variables: sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-function perform_timestep!(dt::FLOAT)
+#function perform_timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+#                   statetmp::OffsetArray{Float64, 3, Array{Float64, 3}},
+#                   flux::Array{Float64, 3},
+#                   tend::Array{Float64, 3},
+#                   dt::Float64,
+#                   recvbuf_l::Array{Float64, 3},
+#                   recvbuf_r::Array{Float64, 3},
+#                   sendbuf_l::Array{Float64, 3},
+#                   sendbuf_r::Array{Float64, 3},
+#                   hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+#                   hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}},
+#                   hy_dens_int::Vector{Float64},
+#                   hy_dens_theta_int::Vector{Float64},
+#                   hy_pressure_int::Vector{Float64})
+
+function perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l,
+                   recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell,
+                   hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int,
+                   hy_pressure_int)
     
     local direction_switch = true
     
@@ -95,22 +111,10 @@ end
 #Perform a single semi-discretized step in time with the form:
 #state_out = state_init + dt * rhs(state_forcing)
 #Meaning the step starts from state_init, computes the rhs using state_forcing, and stores the result in state_out
-function semi_discrete_step!(state_init::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    state_forcing::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    state_out::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    dt::FLOAT,
-                    dir::INTEGER,
-                    flux::Array{FLOAT, 3},
-                    tend::Array{FLOAT, 3},
-                    recvbuf_l::Array{FLOAT, 3},
-                    recvbuf_r::Array{FLOAT, 3},
-                    sendbuf_l::Array{FLOAT, 3},
-                    sendbuf_r::Array{FLOAT, 3},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_int::Vector{FLOAT},
-                    hy_dens_theta_int::Vector{FLOAT},
-                    hy_pressure_int::Vector{FLOAT})
+function semi_discrete_step!(state_init, state_forcing, state_out, dt,
+                    dir, flux, tend, recvbuf_l, recvbuf_r, sendbuf_l,
+                    sendbuf_r, hy_dens_cell, hy_dens_theta_cell, hy_dens_int,
+                    hy_dens_theta_int, hy_pressure_int)
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
@@ -165,13 +169,8 @@ function semi_discrete_step!(state_init::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI
-function set_halo_values_x!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    recvbuf_l::Array{FLOAT, 3},
-                    recvbuf_r::Array{FLOAT, 3},
-                    sendbuf_l::Array{FLOAT, 3},
-                    sendbuf_r::Array{FLOAT, 3},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function set_halo_values_x!(state, recvbuf_l, recvbuf_r, sendbuf_l,
+                    sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
     if NRANKS == 1
         for ll in 1:NUM_VARS
@@ -238,12 +237,12 @@ function set_halo_values_x!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
  
 end
 
-function compute_tendencies_x!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    flux::Array{FLOAT, 3},
-                    tend::Array{FLOAT, 3},
-                    dt::FLOAT,
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function compute_tendencies_x!(state,
+                    flux,
+                    tend,
+                    dt,
+                    hy_dens_cell,
+                    hy_dens_theta_cell)
 
     local stencil = Array{FLOAT}(undef, STEN_SIZE)
     local d3_vals = Array{FLOAT}(undef, NUM_VARS)
@@ -294,9 +293,7 @@ end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI
 #decomposition in the vertical direction
-function set_halo_values_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    hy_dens_cell::OffsetVector{FLOAT, Vector{FLOAT}},
-                    hy_dens_theta_cell::OffsetVector{FLOAT, Vector{FLOAT}})
+function set_halo_values_z!(state, hy_dens_cell, hy_dens_theta_cell)
     
     for ll in 1:NUM_VARS
         for i in 1-HS:NX+HS
@@ -321,13 +318,8 @@ function set_halo_values_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
 
 end
         
-function compute_tendencies_z!(state::OffsetArray{FLOAT, 3, Array{FLOAT, 3}},
-                    flux::Array{FLOAT, 3},
-                    tend::Array{FLOAT, 3},
-                    dt::FLOAT,
-                    hy_dens_int::Vector{FLOAT},
-                    hy_dens_theta_int::Vector{FLOAT},
-                    hy_pressure_int::Vector{FLOAT})
+function compute_tendencies_z!(state, flux, tend, dt, hy_dens_int,
+                    hy_dens_theta_int, hy_pressure_int)
     
     local stencil = Array{FLOAT}(undef, STEN_SIZE)
     local d3_vals = Array{FLOAT}(undef, NUM_VARS)

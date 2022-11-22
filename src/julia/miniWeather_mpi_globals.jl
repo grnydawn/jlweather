@@ -4,6 +4,9 @@ using AccelInterfaces
 
 
 import Profile
+import TimerOutputs.TimerOutput,
+       TimerOutputs.@timeit,
+       TimerOutputs.show
 
 import OffsetArrays.OffsetArray,
        OffsetArrays.OffsetVector
@@ -178,6 +181,8 @@ sendbuf_r = Array{Float64}(undef, HS, NZ, NUM_VARS)
 recvbuf_l = Array{Float64}(undef, HS, NZ, NUM_VARS)
 recvbuf_r = Array{Float64}(undef, HS, NZ, NUM_VARS)   
 
+const to = TimerOutput()
+
 ##############
 # functions
 ##############
@@ -224,7 +229,7 @@ function main(args::Vector{String})
 
         #Perform a single time step
         # No difference in performance after removing all arguments except dt
-        perform_timestep!(dt)
+        @timeit to "timestep" perform_timestep!(dt)
 
         #Update the elapsed time and output counter
         etime = etime + dt
@@ -252,6 +257,7 @@ function main(args::Vector{String})
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
+        show(to); println("")
     end
     finalize!(state)
 
@@ -551,23 +557,23 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
     
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
-        set_halo_values_x!(state_forcing)
+        @timeit to "halo_x" set_halo_values_x!(state_forcing)
 
         #Compute the time tendencies for the fluid state in the x-direction
-        compute_tendencies_x!(state_forcing,dt)
+        @timeit to "tend_x" compute_tendencies_x!(state_forcing,dt)
 
         
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
-        set_halo_values_z!(state_forcing)
+        @timeit to "halo_z" set_halo_values_z!(state_forcing)
         
         #Compute the time tendencies for the fluid state in the z-direction
-        compute_tendencies_z!(state_forcing,dt)
+        @timeit to "tend_z" compute_tendencies_z!(state_forcing,dt)
         
     end
   
     #Apply the tendencies to the fluid state
-    for ll in 1:NUM_VARS
+    @timeit to "update" for ll in 1:NUM_VARS
         for k in 1:NZ
             for i in 1:NX
                 if DATA_SPEC == DATA_SPEC_GRAVITY_WAVES

@@ -1,18 +1,9 @@
-module Variables
-
 import TimerOutputs.TimerOutput
 
 import OffsetArrays.OffsetArray,
        OffsetArrays.OffsetVector
 
-using ..Constants: FLOAT, NX, NZ, HS, NUM_VARS, NQPOINTS, I_BEG, K_BEG
-using ..Constants: DX, DZ, qpoints, qweights, DATA_SPEC, DATA_SPEC_COLLISION
-using ..Constants: DATA_SPEC_THERMAL, DATA_SPEC_GRAVITY_WAVES
-using ..Constants: DATA_SPEC_DENSITY_CURRENT, DATA_SPEC_INJECTION
-using ..Constants: GRAV, CP, P0, RD, C0, GAMMA
-using ..Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT
-
-function injection!(x::FLOAT, z::FLOAT)
+function injection!(x, z)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
@@ -25,7 +16,7 @@ function injection!(x::FLOAT, z::FLOAT)
     return r, u, w, t, hr, ht
 end
 
-function density_current!(x::FLOAT, z::FLOAT)
+function density_current!(x, z)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
@@ -40,7 +31,7 @@ function density_current!(x::FLOAT, z::FLOAT)
     return r, u, w, t, hr, ht
 end
 
-function gravity_waves!(x::FLOAT, z::FLOAT)
+function gravity_waves!(x, z)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_bvfreq!(z, FLOAT(0.02))
@@ -55,7 +46,7 @@ end
 
 
 #Rising thermal
-function thermal!(x::FLOAT, z::FLOAT)
+function thermal!(x, z)
 
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
@@ -71,7 +62,7 @@ function thermal!(x::FLOAT, z::FLOAT)
 end
 
 #Colliding thermals
-function collision!(x::FLOAT, z::FLOAT)
+function collision!(x, z)
     
     #Hydrostatic density and potential temperature
     hr,ht = hydro_const_theta!(z)
@@ -88,7 +79,7 @@ function collision!(x::FLOAT, z::FLOAT)
 end
 
 #Establish hydrstatic balance using constant potential temperature (thermally neutral atmosphere)
-function hydro_const_theta!(z::FLOAT)
+function hydro_const_theta!(z)
 
     r      = FLOAT(0.0) # Density
     t      = FLOAT(0.0) # Potential temperature
@@ -105,7 +96,7 @@ function hydro_const_theta!(z::FLOAT)
     return r, t
 end
 
-function hydro_const_bvfreq!(z::FLOAT, bv_freq0::FLOAT)
+function hydro_const_bvfreq!(z, bv_freq0)
 
     r      = FLOAT(0.0) # Density
     t      = FLOAT(0.0) # Potential temperature
@@ -124,9 +115,9 @@ end
 
 
 #Sample from an ellipse of a specified center, radius, and amplitude at a specified location
-function sample_ellipse_cosine!(   x::FLOAT,    z::FLOAT, amp::FLOAT, 
-                                  x0::FLOAT,   z0::FLOAT, 
-                                xrad::FLOAT, zrad::FLOAT )
+function sample_ellipse_cosine!(   x,    z, amp, 
+                                  x0,   z0, 
+                                xrad, zrad )
 
     #Compute distance from bubble center
     local dist = sqrt( ((x-x0)/xrad)^2 + ((z-z0)/zrad)^2 ) * PI / FLOAT(2.0)
@@ -228,9 +219,3 @@ for k in 1:NZ+1
 end
     
 const etime = TimerOutput()
-
-export state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell
-export hy_dens_int, hy_dens_theta_int, hy_pressure_int
-export sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
-
-end

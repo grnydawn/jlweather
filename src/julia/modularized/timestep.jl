@@ -1,5 +1,3 @@
-module Timestep
-
 import TimerOutputs.@timeit
 
 import MPI.Waitall!,
@@ -10,15 +8,6 @@ import MPI.Waitall!,
 import OffsetArrays.OffsetArray,
        OffsetArrays.OffsetVector
 
-using ..Constants: COMM, NRANKS, MYRANK, DATA_SPEC, DATA_SPEC_GRAVITY_WAVES
-using ..Constants: I_BEG, NX, NZ, LEFT_RANK, RIGHT_RANK
-using ..Constants: K_BEG, HS, STEN_SIZE, NUM_VARS, XLEN, ZLEN, HV_BETA
-using ..Constants: CFL, MAX_SPEED, DX, DZ, DT, NQPOINTS, PI, GRAV, CP, CV, RD, P0, C0, GAMMA
-using ..Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, DIR_X, DIR_Z
-using ..Constants: FLOAT, INTEGER, DATA_SPEC_INJECTION
-
-using ..Variables: etime
-
 #Performs a single dimensionally split time step using a simple low-storate three-stage Runge-Kutta time integrator
 #The dimensional splitting is a second-order-accurate alternating Strang splitting in which the
 #order of directions is alternated each time step.
@@ -26,20 +15,6 @@ using ..Variables: etime
 # q*     = q[n] + dt/3 * rhs(q[n])
 # q**    = q[n] + dt/2 * rhs(q*  )
 # q[n+1] = q[n] + dt/1 * rhs(q** )
-#function perform_timestep!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
-#                   statetmp::OffsetArray{Float64, 3, Array{Float64, 3}},
-#                   flux::Array{Float64, 3},
-#                   tend::Array{Float64, 3},
-#                   dt::Float64,
-#                   recvbuf_l::Array{Float64, 3},
-#                   recvbuf_r::Array{Float64, 3},
-#                   sendbuf_l::Array{Float64, 3},
-#                   sendbuf_r::Array{Float64, 3},
-#                   hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
-#                   hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}},
-#                   hy_dens_int::Vector{Float64},
-#                   hy_dens_theta_int::Vector{Float64},
-#                   hy_pressure_int::Vector{Float64})
 
 function perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l,
                    recvbuf_r, sendbuf_l, sendbuf_r, hy_dens_cell,
@@ -375,9 +350,5 @@ function compute_tendencies_z!(state, flux, tend, dt, hy_dens_int,
         end
     end
 
-
-end
-
-export perform_timestep!
 
 end

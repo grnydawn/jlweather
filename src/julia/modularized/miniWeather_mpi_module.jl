@@ -20,22 +20,8 @@ import Printf.@printf
 Init()
 
 include("constants.jl")
-
-using .Constants: COMM, NRANKS, SIM_TIME, NX_GLOB, NZ_GLOB, OUT_FREQ, LOG_FREQ
-using .Constants: FLOAT, INTEGER, OUTFILE, NPER, I_BEG, I_END, NX, NZ
-using .Constants: MASTERRANK, MASTERPROC, NUM_VARS
-using .Constants: DX, DZ, DT, NQPOINTS, PI, GRAV, CP, CV, RD, P0, C0, GAMMA
-using .Constants: ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT
-
 include("variables.jl")
-
-using .Variables: state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell
-using .Variables: hy_dens_int, hy_dens_theta_int, hy_pressure_int
-using .Variables: sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, etime
-
 include("timestep.jl")
-using .Timestep: perform_timestep!
-
 
 ##############
 # functions

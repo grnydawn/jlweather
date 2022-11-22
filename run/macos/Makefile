@@ -28,6 +28,8 @@ JULIA := julia --project=.
 
 SRCDIR :=../../src
 JAISRC := ${SRCDIR}/jai/miniWeather_accel.jl
+JL2CONSTARRAYGLOBALSSRC := ${SRCDIR}/julia/miniWeather_mpi_2constarrayglobals.jl
+JL2GLOBALSSRC := ${SRCDIR}/julia/miniWeather_mpi_2globals.jl
 JLCONSTSRC := ${SRCDIR}/julia/miniWeather_mpi_const.jl
 JLGLOBALSSRC := ${SRCDIR}/julia/miniWeather_mpi_globals.jl
 JLMODULESRC := ${SRCDIR}/julia/modularized/miniWeather_mpi_module.jl
@@ -57,10 +59,12 @@ jai:
 	${JULIA} --color=yes -- ${JAISRC} ${ARGS}
 
 julia:
+	${JULIA} --color=yes -- ${JL2CONSTARRAYGLOBALSSRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JL2GLOBALSSRC} ${ARGS}
 	#${JULIA} --color=yes -- ${JLCONSTSRC} ${ARGS}
 	#${JULIA} --color=yes -- ${JLGLOBALSSRC} ${ARGS}
 	#${JULIA} --color=yes -- ${JLSTRUCTSRC} ${ARGS}
-	${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
+	#${JULIA} --color=yes -- ${JLORGSRC} ${ARGS}
 
 module:
 	${JULIA} --color=yes -- ${JLMODULESRC} ${ARGS}

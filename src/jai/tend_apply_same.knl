@@ -5,7 +5,7 @@
     int k = blockIdx.y;
     int ll = blockIdx.z;
 
-    state_out[i][k][ll] = state_init[i][k][ll] + dt * tend[i][k][ll];
+    state[i][k][ll] = state[i][k][ll] + dt * tend[i][k][ll];
 
 
 [fortran_openacc]
@@ -15,7 +15,7 @@
 
     !Apply the tendencies to the fluid state
     !!!!$acc parallel loop collapse(3) async
-    !$acc parallel loop collapse(3) present(state_init, state_out, tend, hy_dens_cell) async
+    !$acc parallel loop collapse(3) present(state, tend, hy_dens_cell) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -40,7 +40,7 @@
             endif
             tend(i,k,ID_WMOM) = tend(i,k,ID_WMOM) + wpert*hy_dens_cell(k)
           endif
-          state_out(i,k,ll) = state_init(i,k,ll) + dt * tend(i,k,ll)
+          state(i,k,ll) = state(i,k,ll) + dt * tend(i,k,ll)
         enddo
       enddo
     enddo

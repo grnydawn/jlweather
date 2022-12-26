@@ -21,9 +21,8 @@ DATA_SPEC := ${DATA_SPEC_COLLISION}
 #DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
 ACCEL_TYPE := fortran_openacc
-#WORK_DIR := /gpfs/alpine/cli133/proj-shared/grnydawn/temp1
 #WORK_DIR := /ccs/home/grnydawn/temp/jlweathertests
-WORK_DIR  := /gpfs/alpine/cli133/proj-shared/grnydawn/temp
+WORK_DIR  := /gpfs/alpine/scratch/grnydawn/cli137/jaiwork
 DEBUG_DIR := ${WORK_DIR}
 OUT_FILE  := ${WORK_DIR}/output.nc
 

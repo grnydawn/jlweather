@@ -1,4 +1,12 @@
 
+[cuda]
+
+    int i = blockIdx.x;
+    int k = blockIdx.y;
+    int ll = blockIdx.z;
+
+    statetmp[i][k][ll] = state[i][k][ll] + dt * tend[i][k][ll];
+
 [hip]
 
     int i = blockIdx.x;
@@ -14,8 +22,8 @@
     real(C_DOUBLE) :: x, z, wpert, dist, x0, z0, xrad, zrad, amp
 
     !Apply the tendencies to the fluid state
-    !!!!$acc parallel loop collapse(3) async
-    !$acc parallel loop collapse(3) present(state, statetmp, tend, hy_dens_cell) async
+    !!!!$acc parallel loop collapse(3)
+    !$acc parallel loop collapse(3) present(state, statetmp, tend, hy_dens_cell)
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx

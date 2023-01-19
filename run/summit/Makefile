@@ -31,6 +31,7 @@ JULIA := julia --project=. --check-bounds=yes
 SRCDIR :=../../src
 JAISRC := ${SRCDIR}/jai/miniWeather_accel.jl
 JAIHIPSRC := ${SRCDIR}/jai/miniWeather_accel_hip.jl
+JAICUDASRC := ${SRCDIR}/jai/miniWeather_accel_cuda.jl
 JLSRC := ${SRCDIR}/julia/miniWeather_mpi.jl
 JLORGSRC := ${SRCDIR}/julia/miniWeather_mpi_org.jl
 FORTSRC := ${SRCDIR}/fortran/miniWeather_mpi.F90
@@ -58,6 +59,9 @@ jai:
 
 jaihip:
 	${JULIA} --color=yes -- ${JAIHIPSRC} ${ARGS}
+
+jaicuda:
+	${JULIA} --color=yes -- ${JAICUDASRC} ${ARGS}
 
 julia:
 	${JULIA} --color=yes -- ${JLSRC} ${ARGS}

@@ -225,7 +225,7 @@ function main(args::Vector{String})
     local mass0, te0 = reductions(vars)
 
     #Output the initial state
-    output(vars,etime,nt)
+    #output(vars,etime,nt)
 
     
     # main loop
@@ -248,7 +248,7 @@ function main(args::Vector{String})
         if (output_counter >= OUT_FREQ)
           #Increment the number of outputs
           nt = nt + 1
-          output(vars, etime,nt)
+          #output(vars, etime,nt)
           output_counter = output_counter - OUT_FREQ
         end
 

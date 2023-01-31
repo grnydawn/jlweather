@@ -1,6 +1,9 @@
 using AccelInterfaces
 
 import Profile
+import TimerOutputs.TimerOutput,
+       TimerOutputs.@timeit,
+       TimerOutputs.show
 
 import OffsetArrays.OffsetArray,
        OffsetArrays.OffsetVector
@@ -171,6 +174,7 @@ const DATA_SPEC_INJECTION       = 6
 const qpoints     = Array{Float64}([0.112701665379258311482073460022E0 , 0.500000000000000000000000000000E0 , 0.887298334620741688517926539980E0])
 const qweights    = Array{Float64}([0.277777777777777777777777777779E0 , 0.444444444444444444444444444444E0 , 0.277777777777777777777777777779E0])
 
+const to = TimerOutput()
 ##############
 # functions
 ##############
@@ -197,9 +201,9 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
-    @jaccel framework(
-                    fortran_openacc=COMPILE_FOPENACC_CRAY,
+    @jaccel mini framework(
                     fortran=COMPILE_FORTRAN,
+                    #fortran_openacc=COMPILE_FOPENACC_CRAY,
                     #priority=("fortran_openacc", "fortran") 
                 ) device(
                     (MYRANK+1)%8
@@ -211,26 +215,26 @@ function main(args::Vector{String})
                     master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR
                 )
 
-    @jkernel reduce_kernel PATH_REDUCTION_KERNEL
-    @jkernel tend_x_kernel PATH_TEND_X_KERNEL 
-    @jkernel tend_z_kernel PATH_TEND_Z_KERNEL 
-    @jkernel tend_apply_kernel PATH_TEND_APPLY_KERNEL 
-    @jkernel halo_1rank_kernel PATH_HALO_1RANK_KERNEL 
-    @jkernel halo_sendbuf_kernel PATH_HALO_SENDBUF_KERNEL 
-    @jkernel halo_recvbuf_kernel PATH_HALO_RECVBUF_KERNEL 
-    @jkernel halo_inject_kernel PATH_HALO_INJECT_KERNEL 
-    @jkernel halo_z_kernel PATH_HALO_Z_KERNEL 
+    @jkernel mini reduce_kernel PATH_REDUCTION_KERNEL
+    @jkernel mini tend_x_kernel PATH_TEND_X_KERNEL 
+    @jkernel mini tend_z_kernel PATH_TEND_Z_KERNEL 
+    @jkernel mini tend_apply_kernel PATH_TEND_APPLY_KERNEL 
+    @jkernel mini halo_1rank_kernel PATH_HALO_1RANK_KERNEL 
+    @jkernel mini halo_sendbuf_kernel PATH_HALO_SENDBUF_KERNEL 
+    @jkernel mini halo_recvbuf_kernel PATH_HALO_RECVBUF_KERNEL 
+    @jkernel mini halo_inject_kernel PATH_HALO_INJECT_KERNEL 
+    @jkernel mini halo_z_kernel PATH_HALO_Z_KERNEL 
 
     #Initialize the grid and the data  
     (state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
             sendbuf_r, recvbuf_l, recvbuf_r) = init!()
 
-	@jenterdata allocate(state, statetmp, flux, tend, hy_dens_cell,
+	@jenterdata mini allocate(state, statetmp, flux, tend, hy_dens_cell,
             hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int,
             sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-	@jenterdata updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
+	@jenterdata mini updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
     #Initial reductions for mass, kinetic energy, and total energy
@@ -239,7 +243,7 @@ function main(args::Vector{String})
     #Output the initial state
     output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
 
-    @jwait 
+    @jwait mini 
     
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
@@ -250,16 +254,9 @@ function main(args::Vector{String})
         end
 
         #Perform a single time step
-        if MASTERPROC
-            #Profile.@profile perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-            perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-                      sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
-                      hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-        else
-            perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
-                      sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
-                      hy_dens_int, hy_dens_theta_int, hy_pressure_int)
-        end
+        @timeit to "timestep" perform_timestep!(state, statetmp, flux, tend, dt, recvbuf_l, recvbuf_r,
+                  sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
+                  hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
         #Update the elapsed time and output counter
         etime = etime + dt
@@ -281,11 +278,7 @@ function main(args::Vector{String})
 
     end
 
-    @jwait 
-
-    if MASTERPROC
-	    #Profile.print(format=:flat, C=true, sortedby=:count, mincount=10)
-    end
+    @jwait mini 
 
     mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
@@ -293,12 +286,13 @@ function main(args::Vector{String})
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
+        show(to); println("")
     end
  
- 	@jexitdata deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
+ 	@jexitdata mini deallocate(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
 			hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-    @jdecel 
+    @jdecel mini 
 
     finalize!(state)
 
@@ -642,25 +636,24 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
 
     if dir == DIR_X
         #Set the halo values for this MPI task's fluid state in the x-direction
-
-        set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
+        @timeit to "halo_x" set_halo_values_x!(state_forcing, recvbuf_l, recvbuf_r, sendbuf_l,
                            sendbuf_r, hy_dens_cell, hy_dens_theta_cell)
 
         #Compute the time tendencies for the fluid state in the x-direction
-        compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
+        @timeit to "tend_x" compute_tendencies_x!(state_forcing,flux,tend,dt, hy_dens_cell, hy_dens_theta_cell)
 
          
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
-        set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
+        @timeit to "halo_z" set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
         
         #Compute the time tendencies for the fluid state in the z-direction
-        compute_tendencies_z!(state_forcing,flux,tend,dt,
+        @timeit to "tend_z" compute_tendencies_z!(state_forcing,flux,tend,dt,
                     hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
 
-     @jlaunch(tend_apply_kernel, state_init, tend, hy_dens_cell, dt; output=(state_out, tend))
+     @timeit to "update" @jlaunch mini tend_apply_kernel input(state_init, tend, hy_dens_cell, dt) output(state_out, tend)
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI
@@ -673,7 +666,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
     if NRANKS == 1
-        @jlaunch(halo_1rank_kernel, state; output=(state,))
+        @jlaunch mini halo_1rank_kernel input(state) output(state)
         return
     end
 
@@ -685,10 +678,10 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     req_r[2] = Irecv!(recvbuf_r,RIGHT_RANK,1,COMM)
 
     #Pack the send buffers
-    @jlaunch(halo_sendbuf_kernel, state; output=(sendbuf_l, sendbuf_r))
+    @jlaunch mini halo_sendbuf_kernel input(state) output(sendbuf_l, sendbuf_r)
 
-    @jexitdata updatefrom(sendbuf_l, sendbuf_r) async
-    @jwait 
+    @jexitdata mini updatefrom(sendbuf_l, sendbuf_r) async
+    @jwait mini
 
     #Fire off the sends
     req_s[1] = Isend(sendbuf_l, LEFT_RANK,1,COMM)
@@ -697,17 +690,17 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Wait for receives to finish
     local statuses = Waitall!(req_r)
 
-    @jenterdata updateto(recvbuf_l,recvbuf_r) async
+    @jenterdata mini updateto(recvbuf_l,recvbuf_r) async
 
     #Unpack the receive buffers
-    @jlaunch(halo_recvbuf_kernel, recvbuf_l, recvbuf_r; output=(state,))
+    @jlaunch mini halo_recvbuf_kernel input(recvbuf_l, recvbuf_r) output(state,)
 
     #Wait for sends to finish
     local statuses = Waitall!(req_s)
     
     if (DATA_SPEC == DATA_SPEC_INJECTION)
        if (MYRANK == 0)
-          @jlaunch(halo_inject_kernel, state, hy_dens_cell, hy_dens_theta_cell; output=(state,))
+          @jlaunch mini halo_inject_kernel input(state, hy_dens_cell, hy_dens_theta_cell) output(state,)
        end
     end
  
@@ -720,7 +713,7 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jlaunch(tend_x_kernel, state, dt,hy_dens_cell, hy_dens_theta_cell; output=(flux, tend))
+    @jlaunch mini tend_x_kernel input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux, tend)
 end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI
@@ -729,7 +722,7 @@ function set_halo_values_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
-    @jlaunch(halo_z_kernel, state, hy_dens_cell; output=(state,))
+    @jlaunch mini halo_z_kernel input(state, hy_dens_cell) output(state,)
 
 end
 
@@ -741,7 +734,7 @@ function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_dens_theta_int::Vector{Float64},
                     hy_pressure_int::Vector{Float64})
 
-    @jlaunch(tend_z_kernel, state, dt, hy_dens_int, hy_dens_theta_int, hy_pressure_int; output=(flux, tend,))
+    @jlaunch mini tend_z_kernel input(state, dt, hy_dens_int, hy_dens_theta_int, hy_pressure_int) output(flux, tend)
 end
 
 function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
@@ -752,7 +745,7 @@ function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     local te = zero(Float64)
     glob = Array{Float64}(undef, 2)
 
-    @jlaunch(reduce_kernel, state, hy_dens_cell, hy_dens_theta_cell; output=(glob,))
+    @jlaunch mini reduce_kernel input(state, hy_dens_cell, hy_dens_theta_cell) output(glob)
 
     mass = glob[1]
     te = glob[2]
@@ -769,7 +762,7 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                 hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                 hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jexitdata updatefrom(state)
+    @jexitdata mini updatefrom(state)
 
     var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 

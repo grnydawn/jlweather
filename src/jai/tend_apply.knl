@@ -1,4 +1,4 @@
-[fortran_openacc]
+[fortran, fortran_openacc]
 
     integer :: i,k,ll,s
     real(C_DOUBLE) :: x, z, wpert, dist, x0, z0, xrad, zrad, amp

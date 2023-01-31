@@ -1,4 +1,4 @@
-[fortran_openacc]
+[fortran, fortran_openacc]
 
     integer :: k
     real(C_DOUBLE) :: z

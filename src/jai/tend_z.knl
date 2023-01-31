@@ -1,4 +1,4 @@
-[fortran_openacc]
+[fortran, fortran_openacc]
 
     integer :: i,k,ll,s
     real(C_DOUBLE) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef

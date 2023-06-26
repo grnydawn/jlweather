@@ -21,10 +21,10 @@ DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
 ACCEL_TYPE := fortran_openacc
 WORK_DIR  := /lustre/orion/cli115/proj-shared/grnydawn/jaiwork
-#WORK_DIR := /ccs/home/grnydawn/temp/jlweathertests
 DEBUG_DIR := ${WORK_DIR}
 OUT_FILE  := ${WORK_DIR}/output.nc
 
+#JULIA := julia --project=. --check-bounds=no
 JULIA := julia --project=.
 
 SRCDIR :=../../src

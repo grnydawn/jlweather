@@ -46,6 +46,7 @@ const COMPILE_HIP = "hipcc -shared -fPIC -lamdhip64 -g"
 const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl") 
 const PATH_TEND_APPLY_KERNEL = joinpath(@__DIR__, "tend_apply.knl") 
 const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl") 
+const PATH_TEND_X_CALC_KERNEL = joinpath(@__DIR__, "tend_x_calc.knl") 
 const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl") 
 const PATH_HALO_1RANK_KERNEL = joinpath(@__DIR__, "halo_1rank.knl") 
 const PATH_HALO_SENDBUF_KERNEL = joinpath(@__DIR__, "halo_sendbuf.knl") 
@@ -220,7 +221,7 @@ function main(args::Vector{String})
 
     @jkernel PATH_REDUCTION_KERNEL reduce_kernel  mini
     @jkernel PATH_TEND_X_KERNEL tend_x_kernel  mini framework(hip=COMPILE_HIP)
-    #@jkernel PATH_TEND_X_KERNEL tend_x_kernel  mini
+    @jkernel PATH_TEND_X_CALC_KERNEL tend_x_calc_kernel  mini framework(hip=COMPILE_HIP)
     @jkernel PATH_TEND_Z_KERNEL tend_z_kernel  mini
     @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel  mini
     @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel  mini framework(hip=COMPILE_HIP)
@@ -716,19 +717,13 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    #@jenterdata mini updateto(state, hy_dens_cell, hy_dens_theta_cell)
     THREADS = ((NZ, NX+1),1)
-    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux) hip(threads=THREADS)
-    @jexitdata mini updatefrom(state, flux)
+    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux, tend) hip(threads=THREADS)
  
-    for ll in 1:NUM_VARS
-        for k in 1:NZ
-            for i in 1:NX
-                tend[i,k,ll] = -( flux[i+1,k,ll] - flux[i,k,ll] ) / DX
-            end
-        end
-    end
+    THREADS = ((NUM_VARS, NZ, NX),1)
+    @jlaunch tend_x_calc_kernel mini input(flux) output(tend) hip(threads=THREADS)
 
+    @jexitdata mini updatefrom(state, tend)
 end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI

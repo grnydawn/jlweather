@@ -1,0 +1,25 @@
+[fortran, fortran_openacc]
+
+    do ll = 1 , NUM_VARS
+      do k = 1 , nz
+        do i = 1 , nx
+          tend(i,k,ll) = -( flux(i,k+1,ll) - flux(i,k,ll) ) / dz
+          if (ll == ID_WMOM) then
+            tend(i,k,ID_WMOM) = tend(i,k,ID_WMOM) - state(i,k,ID_DENS)*grav
+          endif
+        enddo
+      enddo
+    enddo
+
+[hip]
+
+    int ll = blockIdx.x; //ll
+    int k = blockIdx.y; //Z
+    int i = blockIdx.z; //X
+
+    tend[ll][k][i] = -( flux[ll][k+1][i] - flux[ll][k][i] ) / DZ;
+
+    if (ll == ID_WMOM) {
+	    tend[ID_WMOM-1][k][i] = tend[ID_WMOM-1][k][i] - state[ID_DENS-1][k+HS][i+HS] * GRAV;
+    }
+

@@ -206,9 +206,7 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
-    @jaccel mini framework(
-                    fortran=COMPILE_FORTRAN,
-                ) device(
+    @jaccel mini device(
                     (MYRANK+1)%8
                 ) constant(
                     NX, NZ, DX, DZ, HS, NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV,
@@ -218,15 +216,15 @@ function main(args::Vector{String})
                     master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR
                 )
 
-    @jkernel PATH_REDUCTION_KERNEL reduce_kernel  mini
-    @jkernel PATH_TEND_X_KERNEL tend_x_kernel  mini
-    @jkernel PATH_TEND_Z_KERNEL tend_z_kernel  mini
-    @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel  mini
-    @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel  mini framework(hip=COMPILE_HIP)
-    @jkernel PATH_HALO_SENDBUF_KERNEL halo_sendbuf_kernel  mini
-    @jkernel PATH_HALO_RECVBUF_KERNEL halo_recvbuf_kernel  mini
-    @jkernel PATH_HALO_INJECT_KERNEL halo_inject_kernel  mini
-    @jkernel PATH_HALO_Z_KERNEL halo_z_kernel  mini
+    @jkernel PATH_REDUCTION_KERNEL reduce_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_TEND_X_KERNEL tend_x_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_TEND_Z_KERNEL tend_z_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_HALO_SENDBUF_KERNEL halo_sendbuf_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_HALO_RECVBUF_KERNEL halo_recvbuf_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_HALO_INJECT_KERNEL halo_inject_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_HALO_Z_KERNEL halo_z_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
 
     #Initialize the grid and the data  
     (state, statetmp, hy_dens_cell, hy_dens_theta_cell,
@@ -667,6 +665,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     @jenterdata mini updateto(state)
 
     if NRANKS == 1
+        @jenterdata mini updateto(state)
         THREADS = ((NZ, NUM_VARS),1)
         @jlaunch halo_1rank_kernel mini input(state) output(state) hip(threads=THREADS)
         @jexitdata mini updatefrom(state)

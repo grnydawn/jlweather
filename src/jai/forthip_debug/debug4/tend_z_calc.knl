@@ -15,9 +15,9 @@
 
     //THREADS = ((NUM_VARS, NZ, NX),1)
 
-    int i = blockIdx.x; //X
-    int k = blockIdx.y; //Z
-    int ll = blockIdx.z; //ll
+    int ll = blockIdx.x; //ll
+    int k = blockIdx.x; //Z
+    int i = blockIdx.y; //X
 
     tend[ll][k][i] = -( flux[ll][k+1][i] - flux[ll][k][i] ) / DZ;
 

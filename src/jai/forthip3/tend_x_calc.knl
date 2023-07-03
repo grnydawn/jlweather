@@ -12,21 +12,8 @@
 
 [hip]
 
-    int ll = blockIdx.x; //Vars
+    int i = blockIdx.x; //X
     int k = blockIdx.y; //Z
-    int i = blockIdx.z; //X
+    int ll = blockIdx.z; //Vars
 
-/*
-    if (k==0 && i==0 && ll==0) {
-      double ss = 0.0;
-      for (int x1=0; x1<NUM_VARS; x1++) {
-      for (int x2=0; x2<NZ+1; x2++) {
-      for (int x3=0; x3<NX+1; x3++) {
-         ss = ss + flux[x1][x2][x3];
-      }
-      }
-      }
-      printf("DFDFDFDFDDFDFD sum=%20.16f\n", ss);
-	}
-*/
     tend[ll][k][i] = -( flux[ll][k][i+1] - flux[ll][k][i] ) / DX;

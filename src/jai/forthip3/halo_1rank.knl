@@ -2,8 +2,6 @@
 
     integer :: k,ll
 
-    print *, "BBBBBfore: :", state(-1, 1, 1)
-
     !$acc parallel loop collapse(2) present(state) async
     do ll = 1 , NUM_VARS
         do k = 1 , nz
@@ -14,32 +12,13 @@
         enddo
     enddo
 
-    print *, "AAAAAfter: :", state(-1, 1, 1)
-
 [hip]
  
-    // THREADS = ((NUM_VARS, NZ),1)
-    int ll = blockIdx.x;
-    int k = blockIdx.y;
+    int k = blockIdx.x;
+    int ll = blockIdx.y;
 
-    if (ll==0 && k==0) {
-		printf("BBBBBfore: %.16f\n", state[0][HS][0]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][0], state[ll][k+HS][NX]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][1], state[ll][k+HS][NX+1]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][NX+HS], state[ll][k+HS][2]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][NX+HS+1], state[ll][k+HS][3]);
-    }
-
-    state[ll][k+HS][0] = state[ll][k+HS][NX];
-    state[ll][k+HS][1] = state[ll][k+HS][NX+1];
-    state[ll][k+HS][NX+HS] = state[ll][k+HS][2];
-    state[ll][k+HS][NX+HS+1] = state[ll][k+HS][3];
-
-    if (ll==0 && k==0) {
-		printf("AAAAAfter: %.16f\n", state[0][HS][0]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][0], state[ll][k+HS][NX]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][1], state[ll][k+HS][NX+1]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][NX+HS], state[ll][k+HS][2]);
-        printf("%.16f : %.16f\n", state[ll][k+HS][NX+HS+1], state[ll][k+HS][3]);
-    }
+    state[ll][k+HS][0] = state[ll][k+HS][NX+HS-2];
+    state[ll][k+HS][1] = state[ll][k+HS][NX+HS-1];
+    state[ll][k+HS][NX+2*HS-2] = state[ll][k+HS][2];
+    state[ll][k+HS][NX+2*HS-1] = state[ll][k+HS][3];
 

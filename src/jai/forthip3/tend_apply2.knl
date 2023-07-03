@@ -42,4 +42,3 @@
     int ll = blockIdx.z; //Vars
 
     state_out[ll][k+HS][i+HS] = state_init[ll][k+HS][i+HS] + dt * tend[ll][k][i];
-    //state_out[ll][k+HS][i+HS] = state_out[ll][k+HS][i+HS] + dt * tend[ll][k][i];

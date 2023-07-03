@@ -12,8 +12,8 @@
 
 [hip]
 
-    int ll = blockIdx.x; //Vars
+    int i = blockIdx.x; //X
     int k = blockIdx.y; //Z
-    int i = blockIdx.z; //X
+    int ll = blockIdx.z; //Vars
 
     tend[ll][k][i] = -( flux[ll][k][i+1] - flux[ll][k][i] ) / DX;

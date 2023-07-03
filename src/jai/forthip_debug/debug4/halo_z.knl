@@ -26,8 +26,8 @@
 
 [hip]
 
-    int i = blockIdx.x;  //X
-    int ll = blockIdx.y; // var
+    int ll = blockIdx.x; // var
+    int i = blockIdx.y;  //X
 
 	if (ll == ID_WMOM -1) {
 	  state[ll][0][i]       = 0;

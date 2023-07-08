@@ -262,8 +262,6 @@ function main(args::Vector{String})
             dt = SIM_TIME - etime
         end
 
-        println("*** SUM(state) = $(sum(state)) ***")
-
         #Perform a single time step
         @timeit to "timestep" perform_timestep!(state, statetmp, dt, recvbuf_l, recvbuf_r,
                   sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
@@ -292,6 +290,8 @@ function main(args::Vector{String})
     @jwait mini 
 
     @jexitdata updatefrom(state)
+
+    println("*** SUM(state) = $(sum(state)) ***")
 
     mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
@@ -692,7 +692,7 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
         #@jenterdata mini updateto(state_init, tend)
         THREADS = ((NX, NZ, NUM_VARS),1)
          @timeit to "update" @jlaunch tend_apply_kernel mini input(state_init, tend, hy_dens_cell, dt) output(state_out, tend)  hip(threads=THREADS)
-        @jexitdata mini updatefrom(state_out)
+        #@jexitdata mini updatefrom(state_out)
 
 
 #    #println("PPPPP ", pointer_from_objref(parent(state_init)), " ",  pointer_from_objref(parent(state_out)))
@@ -755,13 +755,15 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
 
-    if NRANKS == 1
-        @jenterdata mini updateto(state)
-        THREADS = ((NZ, NUM_VARS),1)
-        @jlaunch halo_1rank_kernel mini input(state) output(state) hip(threads=THREADS)
-        @jexitdata mini updatefrom(state)
-        return
-    end
+#    if NRANKS == 1
+#        #@jenterdata mini updateto(state)
+#        THREADS = ((NZ, NUM_VARS),1)
+#        @jlaunch halo_1rank_kernel mini input(state) output(state) hip(threads=THREADS)
+#        #@jexitdata mini updatefrom(state)
+#        return
+#    end
+
+    @jexitdata mini updatefrom(state)
 
     local req_r = Vector{Request}(undef, 2)
     local req_s = Vector{Request}(undef, 2)
@@ -772,9 +774,9 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
 
     #Pack the send buffers
     THREADS = ((HS, NZ, NUM_VARS), 1)
-    @jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r) hip(threads=THREADS)
-
-    @jexitdata mini updatefrom(state, sendbuf_l, sendbuf_r) async
+    #@jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r) hip(threads=THREADS)
+    @jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r) fortran()
+    #@jexitdata mini updatefrom(sendbuf_l, sendbuf_r) async
     @jwait mini
 
     #Fire off the sends
@@ -784,10 +786,12 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Wait for receives to finish
     local statuses = Waitall!(req_r)
 
-    @jenterdata mini updateto(recvbuf_l,recvbuf_r) async
-
     #Unpack the receive buffers
-    @jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state,)
+    #@jenterdata mini updateto(recvbuf_l,recvbuf_r) async
+    THREADS = ((HS, NZ, NUM_VARS), 1)
+    #@jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state) hip(threads=THREADS)
+    @jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state) fortran()
+    @jwait mini
 
     #Wait for sends to finish
     local statuses = Waitall!(req_s)
@@ -798,6 +802,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
        end
     end
  
+    @jenterdata mini updateto(state)
 end
 
 function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
@@ -815,7 +820,7 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
     THREADS = ((NX, NZ, NUM_VARS),1)
     @jlaunch tend_x_calc_kernel mini input(flux) output(tend) hip(threads=THREADS)
 
-    @jexitdata mini updatefrom(tend)
+    #@jexitdata mini updatefrom(tend)
 end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI
@@ -824,10 +829,10 @@ function set_halo_values_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
-    @jenterdata updateto(state)
+    #@jenterdata updateto(state)
     THREADS = ((NX+2*HS, NUM_VARS),1)
     @jlaunch halo_z_kernel mini input(state, hy_dens_cell) output(state,)  hip(threads=THREADS)
-    @jexitdata mini updatefrom(state)
+    #@jexitdata mini updatefrom(state)
     
 #    for ll in 1:NUM_VARS
 #        for i in 1-HS:NX+HS
@@ -868,7 +873,7 @@ function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
     THREADS = ((NX, NZ, NUM_VARS),1)
     @jlaunch tend_z_calc_kernel mini input(state, flux) output(tend) hip(threads=THREADS)
 
-    @jexitdata mini updatefrom(tend)
+    #@jexitdata mini updatefrom(tend)
 
 #    local stencil = Array{Float64}(undef, STEN_SIZE)
 #    local d3_vals = Array{Float64}(undef, NUM_VARS)

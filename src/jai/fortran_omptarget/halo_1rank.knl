@@ -1,0 +1,13 @@
+[fortran, fortran_omptarget]
+
+    integer :: k,ll
+
+      !$omp target teams distribute parallel do simd collapse(2)  depend(inout:asyncid) nowait
+      do ll = 1 , NUM_VARS
+        do k = 1 , nz
+          state(-1  ,k,ll) = state(nx-1,k,ll)
+          state(0   ,k,ll) = state(nx  ,k,ll)
+          state(nx+1,k,ll) = state(1   ,k,ll)
+          state(nx+2,k,ll) = state(2   ,k,ll)
+        enddo
+      enddo

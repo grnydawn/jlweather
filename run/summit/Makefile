@@ -22,8 +22,7 @@ DATA_SPEC := ${DATA_SPEC_THERMAL}
 #DATA_SPEC := ${DATA_SPEC_COLLISION}
 #DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
 
-ACCEL_TYPE := fortran_openacc
-WORK_DIR  := /lustre/orion/cli115/proj-shared/grnydawn/jaiwork
+WORK_DIR  := /gpfs/alpine/scratch/grnydawn/cli137/jaiwork
 DEBUG_DIR := ${WORK_DIR}
 OUT_FILE  := ${WORK_DIR}/output.nc
 
@@ -36,6 +35,7 @@ JAIFORTHIP1SRC := ${SRCDIR}/jai/forthip1/miniWeather_accel.jl
 JAIFORTHIP2SRC := ${SRCDIR}/jai/forthip2/miniWeather_accel.jl
 JAIJULIA2SRC := ${SRCDIR}/jai/forthip2/miniWeather_julia.jl
 JAIFORTHIP3SRC := ${SRCDIR}/jai/forthip3/miniWeather_accel.jl
+JAICUDASRC := ${SRCDIR}/jai/cuda/miniWeather_accel.jl
 JAIFORTOMPSRC := ${SRCDIR}/jai/fortran_omptarget/miniWeather_accel.jl
 JAIFORTACCSRC := ${SRCDIR}/jai/fortran_openacc/miniWeather_accel.jl
 JAIJULIA3SRC := ${SRCDIR}/jai/forthip3/miniWeather_julia.jl
@@ -74,6 +74,9 @@ jai_julia2:
 
 jai_forthip3:
 	${JULIA} --color=yes -- ${JAIFORTHIP3SRC} ${ARGS}
+
+jai_cuda:
+	${JULIA} --color=yes -- ${JAICUDASRC} ${ARGS}
 
 jai_fomp1:
 	${JULIA} --color=yes -- ${JAIFORTOMPSRC} ${ARGS}

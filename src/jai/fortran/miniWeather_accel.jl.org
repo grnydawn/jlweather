@@ -1,6 +1,6 @@
 using AccelInterfaces
 
-#import Profile
+import Profile
 import TimerOutputs.TimerOutput,
        TimerOutputs.@timeit,
        TimerOutputs.show
@@ -245,10 +245,7 @@ function main(args::Vector{String})
 
     #@jwait mini 
     
-    elapsedtime = 0
-
     # main loop
-    #Profile.@profile elapsedtime = @elapsed while etime < SIM_TIME
     elapsedtime = @elapsed while etime < SIM_TIME
 
         #If the time step leads to exceeding the simulation time, shorten it for the last step
@@ -281,16 +278,11 @@ function main(args::Vector{String})
 
     end
 
-    @jwait mini 
+    #@jwait mini 
 
     mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
     if MASTERPROC
-
-        #f = open("profile_count_opt1.out", "w")
-        #Profile.print(f, format=:flat, sortedby=:count, mincount=1)
-        #close(f)
-
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)

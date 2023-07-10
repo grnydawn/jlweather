@@ -56,6 +56,8 @@ const PATH_HALO_RECVBUF_KERNEL = joinpath(@__DIR__, "halo_recvbuf.knl")
 const PATH_HALO_INJECT_KERNEL = joinpath(@__DIR__, "halo_inject.knl") 
 const PATH_HALO_Z_KERNEL = joinpath(@__DIR__, "halo_z.knl") 
 
+const ASYNCID = 1
+
 ##############
 # constants
 ##############
@@ -296,17 +298,10 @@ function main(args::Vector{String})
           @printf("[%3.1f%% of %2.1f]\n", etime/SIM_TIME*100, SIM_TIME)
           log_counter = log_counter - LOG_FREQ
         end
-
     end
 
-    @jwait mini 
-
-    @jexitdata updatefrom(state)
-
-    println("*** SUM(state) = $(sum(state)) ***")
-
     mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
- 
+
     if MASTERPROC
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
@@ -675,7 +670,7 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
     end
 
         #@jenterdata mini updateto(state_init, tend)
-         @timeit to "update" @jlaunch tend_apply_kernel mini input(state_init, tend, hy_dens_cell, dt) output(state_out, tend)
+         @timeit to "update" @jlaunch tend_apply_kernel mini input(state_init, tend, hy_dens_cell, dt, ASYNCID) output(state_out, tend)
         #@jexitdata mini updatefrom(state_out)
 
 
@@ -723,7 +718,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
 
     if NRANKS == 1
         #@jenterdata mini updateto(state)
-        @jlaunch halo_1rank_kernel mini input(state) output(state)
+        @jlaunch halo_1rank_kernel mini input(state, ASYNCID) output(state)
         #@jexitdata mini updatefrom(state)
         return
     end
@@ -739,7 +734,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
 
     #Pack the send buffers
     #@jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r)
-    @jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r) fortran()
+    @jlaunch halo_sendbuf_kernel mini input(state, ASYNCID) output(sendbuf_l, sendbuf_r) fortran()
     #@jexitdata mini updatefrom(sendbuf_l, sendbuf_r) async
     @jwait mini
 
@@ -753,7 +748,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Unpack the receive buffers
     #@jenterdata mini updateto(recvbuf_l,recvbuf_r) async
     #@jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state)
-    @jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state) fortran()
+    @jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r, ASYNCID) output(state) fortran()
     @jwait mini
 
     #Wait for sends to finish
@@ -761,7 +756,7 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     
     if (DATA_SPEC == DATA_SPEC_INJECTION)
        if (MYRANK == 0)
-          @jlaunch halo_inject_kernel mini input(state, hy_dens_cell, hy_dens_theta_cell) output(state,)
+          @jlaunch halo_inject_kernel mini input(state, hy_dens_cell, hy_dens_theta_cell, ASYNCID) output(state,)
        end
     end
  
@@ -775,11 +770,11 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
 
 #    @jenterdata updateto(state)
 
-    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux, tend)
+    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell, ASYNCID) output(flux, tend)
 #    @jexitdata mini updatefrom(flux)
  
 #    @jenterdata updateto(flux)
-    @jlaunch tend_x_calc_kernel mini input(flux) output(tend)
+    @jlaunch tend_x_calc_kernel mini input(flux, ASYNCID) output(tend)
 
     #@jexitdata mini updatefrom(tend)
 end
@@ -791,7 +786,7 @@ function set_halo_values_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
     #@jenterdata updateto(state)
-    @jlaunch halo_z_kernel mini input(state, hy_dens_cell) output(state,)
+    @jlaunch halo_z_kernel mini input(state, hy_dens_cell, ASYNCID) output(state,)
     #@jexitdata mini updatefrom(state)
     
 #    for ll in 1:NUM_VARS
@@ -825,11 +820,11 @@ function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
 
 
     #@jenterdata updateto(state)
-    @jlaunch tend_z_kernel mini input(state, dt,hy_dens_int, hy_dens_theta_int, hy_pressure_int) output(flux, tend)
+    @jlaunch tend_z_kernel mini input(state, dt,hy_dens_int, hy_dens_theta_int, hy_pressure_int, ASYNCID) output(flux, tend)
 #    @jexitdata mini updatefrom(flux)
  
 #    @jenterdata updateto(flux)
-    @jlaunch tend_z_calc_kernel mini input(state, flux) output(tend)
+    @jlaunch tend_z_calc_kernel mini input(state, flux, ASYNCID) output(tend)
 
     #@jexitdata mini updatefrom(tend)
 
@@ -897,7 +892,7 @@ function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     local te = zero(Float64)
     glob = Array{Float64}(undef, 2)
 
-    @jlaunch reduce_kernel mini input(state, hy_dens_cell, hy_dens_theta_cell) output(glob)
+    @jlaunch reduce_kernel mini input(state, hy_dens_cell, hy_dens_theta_cell, ASYNCID) output(glob)
 
     mass = glob[1]
     te = glob[2]
@@ -915,6 +910,7 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                 hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
     @jexitdata mini updatefrom(state)
+    @jwait mini
 
     var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 

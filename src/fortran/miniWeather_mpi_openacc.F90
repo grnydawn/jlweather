@@ -9,8 +9,6 @@
 
 program miniweather
   use mpi
-  use openacc
-
   implicit none
   !Declare the precision for the real constants (at least 15 digits of accuracy = double precision)
 #ifdef SINGLE_PREC
@@ -72,7 +70,7 @@ program miniweather
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !! Variables that are initialized but remain static over the coure of the simulation
+  !! Variables that are initialized but remain static over the course of the simulation
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   real(rp) :: dt                                  !Model time step (seconds)
   integer  :: nx, nz                              !Number of local grid cells in the x- and z- dimensions for this MPI task
@@ -111,8 +109,6 @@ program miniweather
 
   !Initialize MPI, allocate arrays, initialize the grid and the data
   call init(dt)
-
-  call acc_set_device_num(mod(myrank, 8), acc_device_default)
 
   !$acc data copyin(state_tmp,hy_dens_cell,hy_dens_theta_cell,hy_dens_int,hy_dens_theta_int,hy_pressure_int) create(flux,tend,sendbuf_l,sendbuf_r,recvbuf_l,recvbuf_r) copy(state)
 
@@ -173,7 +169,7 @@ contains
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
-  !Performs a single dimensionally split time step using a simple low-storate three-stage Runge-Kutta time integrator
+  !Performs a single dimensionally split time step using a simple low-storage three-stage Runge-Kutta time integrator
   !The dimensional splitting is a second-order-accurate alternating Strang splitting in which the
   !order of directions is alternated each time step.
   !The Runge-Kutta method used here is defined as follows:
@@ -282,7 +278,7 @@ contains
     real(rp), intent(in   ) :: dt
     integer :: i,k,ll,s
     real(rp) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
-    !Compute the hyperviscosity coeficient
+    !Compute the hyperviscosity coefficient
     hv_coef = -hv_beta * dx / (16*dt)
     !Compute fluxes in the x-direction for each cell
     !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
@@ -338,7 +334,7 @@ contains
     real(rp), intent(in   ) :: dt
     integer :: i,k,ll,s
     real(rp) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
-    !Compute the hyperviscosity coeficient
+    !Compute the hyperviscosity coefficient
     hv_coef = -hv_beta * dz / (16*dt)
     !Compute fluxes in the x-direction for each cell
     !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
@@ -700,7 +696,7 @@ contains
   end subroutine collision
 
 
-  !Establish hydrstatic balance using constant potential temperature (thermally neutral atmosphere)
+  !Establish hydrostatic balance using constant potential temperature (thermally neutral atmosphere)
   subroutine hydro_const_theta(z,r,t)
     implicit none
     real(rp), intent(in   ) :: z  !x- and z- location of the point being sampled
@@ -717,7 +713,7 @@ contains
   end subroutine hydro_const_theta
 
 
-  !Establish hydrstatic balance using constant Brunt-Vaisala frequency
+  !Establish hydrostatic balance using constant Brunt-Vaisala frequency
   subroutine hydro_const_bvfreq( z , bv_freq0 , r , t )
     implicit none
     real(rp), intent(in   ) :: z , bv_freq0

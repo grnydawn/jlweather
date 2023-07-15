@@ -44,8 +44,6 @@ const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
 
 const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl") 
 const PATH_TEND_APPLY_KERNEL = joinpath(@__DIR__, "tend_apply.knl") 
-const PATH_TEND_APPLY1_KERNEL = joinpath(@__DIR__, "tend_apply1.knl") 
-const PATH_TEND_APPLY2_KERNEL = joinpath(@__DIR__, "tend_apply2.knl") 
 const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl") 
 const PATH_TEND_X_CALC_KERNEL = joinpath(@__DIR__, "tend_x_calc.knl") 
 const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl") 
@@ -232,10 +230,6 @@ function main(args::Vector{String})
     @jkernel PATH_TEND_Z_CALC_KERNEL tend_z_calc_kernel mini framework(
                 fortran_omptarget=COMPILE_FOMPTARGET_CRAY, fortran=COMPILE_FORTRAN) 
     @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel mini framework(
-                fortran_omptarget=COMPILE_FOMPTARGET_CRAY, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_TEND_APPLY1_KERNEL tend_apply1_kernel mini framework(
-                fortran_omptarget=COMPILE_FOMPTARGET_CRAY, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_TEND_APPLY2_KERNEL tend_apply2_kernel mini framework(
                 fortran_omptarget=COMPILE_FOMPTARGET_CRAY, fortran=COMPILE_FORTRAN) 
     @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel mini framework(
                 fortran_omptarget=COMPILE_FOMPTARGET_CRAY, fortran=COMPILE_FORTRAN) 

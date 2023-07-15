@@ -40,37 +40,16 @@
       enddo
     enddo
 
-[hip]
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !! TODO: THREAD ME
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !Use the fluxes to compute tendencies for each cell
+	!$acc parallel loop collapse(3) present(flux, tend) async
+    do ll = 1 , NUM_VARS
+      do k = 1 , nz
+        do i = 1 , nx
+          tend(i,k,ll) = -( flux(i+1,k,ll) - flux(i,k,ll) ) / dx
+        enddo
+      enddo
+    enddo
 
-    double r, u, w, t, p, hv_coef;
-    double stencil[4], d3_vals[NUM_VARS], vals[NUM_VARS];
-
-    int i = blockDim.x*blockIdx.x + threadIdx.x;
-//    int i = blockIdx.x; //X
-    int k = blockIdx.y; //Z
-    int ll, s;
-
-	if (i <= NX) {
-
-    hv_coef = -HV_BETA * DX / (16*dt);
-
-    for (ll=0; ll<NUM_VARS; ll++) {
-      for (s=0; s<STEN_SIZE; s++) {
-          stencil[s] = state[ll][k+HS][i+s];
-      }
-      vals[ll] = -stencil[0]/12 + 7*stencil[1]/12 + 7*stencil[2]/12 - stencil[3]/12;
-      d3_vals[ll] = -stencil[0] + 3*stencil[1] - 3*stencil[2] + stencil[3];
-    }
-
-    r = vals[ID_DENS-1] + hy_dens_cell[k+HS];
-    u = vals[ID_UMOM-1] / r;
-    w = vals[ID_WMOM-1] / r;
-    t = (vals[ID_RHOT-1] + hy_dens_theta_cell[k+HS] ) / r;
-    p = C0 * pow(r*t, GAMMA);
-
-    flux[ID_DENS-1][k][i] = r*u     - hv_coef*d3_vals[ID_DENS-1];
-    flux[ID_UMOM-1][k][i] = r*u*u+p - hv_coef*d3_vals[ID_UMOM-1];
-    flux[ID_WMOM-1][k][i] = r*u*w   - hv_coef*d3_vals[ID_WMOM-1];
-    flux[ID_RHOT-1][k][i] = r*u*t   - hv_coef*d3_vals[ID_RHOT-1];
-
-	}

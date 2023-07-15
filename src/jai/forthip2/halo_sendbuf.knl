@@ -2,7 +2,7 @@
 
     integer :: s,k,ll
 
-    !$acc parallel loop collapse(3) present(state, sendbuf_l, sendbuf_r) ! async
+    !$acc parallel loop collapse(3) present(state, sendbuf_l, sendbuf_r) async
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do s = 1 , hs
@@ -11,3 +11,13 @@
         enddo
       enddo
     enddo
+
+[hip]
+
+    int s = blockIdx.x;
+    int k = blockDim.y*blockIdx.y + threadIdx.y;
+    //int k = blockIdx.y;
+    int ll = blockIdx.z;
+
+    sendbuf_l[ll][k][s] = state[ll][k+HS][s+HS];
+    sendbuf_r[ll][k][s] = state[ll][k+HS][s+NX];

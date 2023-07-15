@@ -11,3 +11,13 @@
         enddo
       enddo
     enddo
+
+[hip]
+
+    int s  = blockIdx.x;
+    int k  = blockIdx.y;
+    int ll = blockIdx.z;
+	
+    sendbuf_l[ll][k][s] = state[ll][k+HS][HS+s]
+    sendbuf_r[ll][k][s] = state[ll][k+HS][NX+s]
+

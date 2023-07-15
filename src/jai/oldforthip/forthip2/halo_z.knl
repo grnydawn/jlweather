@@ -2,7 +2,7 @@
 
     integer :: i, ll
 
-    !$acc parallel loop collapse(2) present(state, hy_dens_cell) async
+    !$acc parallel loop collapse(2) present(state, hy_dens_cell) ! async
     do ll = 1 , NUM_VARS
       do i = 1-hs,nx+hs
         if (ll == ID_WMOM) then

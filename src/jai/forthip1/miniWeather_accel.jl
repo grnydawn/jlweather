@@ -1,6 +1,5 @@
 using AccelInterfaces
 
-import Profile
 import TimerOutputs.TimerOutput,
        TimerOutputs.@timeit,
        TimerOutputs.show
@@ -39,13 +38,15 @@ import Libdl
 # Accelerators
 ##############
 
-const COMPILE_FOPENACC_CRAY = "ftn -shared -fPIC -h acc,noomp"
-const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
+const THREADS_PER_BLOCK = 256
+
 const COMPILE_HIP = "hipcc -shared -fPIC -lamdhip64 -g"
+const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
 
 const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl") 
 const PATH_TEND_APPLY_KERNEL = joinpath(@__DIR__, "tend_apply.knl") 
 const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl") 
+const PATH_TEND_X_CALC_KERNEL = joinpath(@__DIR__, "tend_x_calc.knl") 
 const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl") 
 const PATH_HALO_1RANK_KERNEL = joinpath(@__DIR__, "halo_1rank.knl") 
 const PATH_HALO_SENDBUF_KERNEL = joinpath(@__DIR__, "halo_sendbuf.knl") 
@@ -196,6 +197,7 @@ julia> main()
 """
 function main(args::Vector{String})
 
+    #Base.GC.enable(false)
     ######################
     # top-level variables
     ######################
@@ -207,7 +209,7 @@ function main(args::Vector{String})
     local nt = Int(1)
 
     @jaccel mini device(
-                    (MYRANK+1)%8
+                    MYRANK%8
                 ) constant(
                     NX, NZ, DX, DZ, HS, NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV,
                     RD, CP, CV, ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE,
@@ -216,15 +218,16 @@ function main(args::Vector{String})
                     master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR
                 )
 
-    @jkernel PATH_REDUCTION_KERNEL reduce_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_TEND_X_KERNEL tend_x_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_TEND_Z_KERNEL tend_z_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_HALO_SENDBUF_KERNEL halo_sendbuf_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_HALO_RECVBUF_KERNEL halo_recvbuf_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_HALO_INJECT_KERNEL halo_inject_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
-    @jkernel PATH_HALO_Z_KERNEL halo_z_kernel mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN) 
+    @jkernel PATH_REDUCTION_KERNEL reduce_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_TEND_X_KERNEL tend_x_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_TEND_X_CALC_KERNEL tend_x_calc_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_TEND_Z_KERNEL tend_z_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_HALO_SENDBUF_KERNEL halo_sendbuf_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_HALO_RECVBUF_KERNEL halo_recvbuf_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_HALO_INJECT_KERNEL halo_inject_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel PATH_HALO_Z_KERNEL halo_z_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
 
     #Initialize the grid and the data  
     (state, statetmp, hy_dens_cell, hy_dens_theta_cell,
@@ -246,6 +249,8 @@ function main(args::Vector{String})
 
     @jwait mini 
     
+    elapsedtime = 0
+
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
 
@@ -279,11 +284,13 @@ function main(args::Vector{String})
 
     end
 
+    @jexitdata mini updatefrom(state)
     @jwait mini 
 
     mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
     if MASTERPROC
+
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
@@ -297,6 +304,7 @@ function main(args::Vector{String})
 
     finalize!(state)
 
+    #Base.GC.enable(true)
 end
 
 function init!()
@@ -662,13 +670,8 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jenterdata mini updateto(state)
-
     if NRANKS == 1
-        @jenterdata mini updateto(state)
-        THREADS = ((NZ, NUM_VARS),1)
-        @jlaunch halo_1rank_kernel mini input(state) output(state) hip(threads=THREADS)
-        @jexitdata mini updatefrom(state)
+        @jlaunch halo_1rank_kernel mini input(state) output(state)
         return
     end
 
@@ -680,11 +683,10 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     req_r[2] = Irecv!(recvbuf_r,RIGHT_RANK,1,COMM)
 
     #Pack the send buffers
-    THREADS = ((HS, NZ, NUM_VARS), 1)
-    @jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r) hip(threads=THREADS)
+    #@jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r)
 
-    @jexitdata mini updatefrom(state, sendbuf_l, sendbuf_r) async
-    @jwait mini
+    #@jexitdata mini updatefrom(sendbuf_l, sendbuf_r) async
+    #@jwait mini
 
     #Fire off the sends
     req_s[1] = Isend(sendbuf_l, LEFT_RANK,1,COMM)
@@ -693,10 +695,10 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Wait for receives to finish
     local statuses = Waitall!(req_r)
 
-    @jenterdata mini updateto(recvbuf_l,recvbuf_r) async
+    #@jenterdata mini updateto(recvbuf_l,recvbuf_r) async
 
     #Unpack the receive buffers
-    @jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state,)
+    #@jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state,)
 
     #Wait for sends to finish
     local statuses = Waitall!(req_s)
@@ -714,7 +716,23 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux, tend)
+    @jenterdata mini updateto(state)
+    #@jwait
+
+    blk_x = div((NX+1), THREADS_PER_BLOCK) + 1
+    THREADS = ((blk_x, NZ),THREADS_PER_BLOCK)
+    #THREADS = ((NX+1, NZ), 1)
+    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux, tend) hip(threads=THREADS)
+    #@jwait
+
+    blk_x = div(NX, THREADS_PER_BLOCK) + 1
+    THREADS = ((blk_x, NZ),THREADS_PER_BLOCK)
+    #THREADS = ((NX, NZ, NUM_VARS),1)
+    @jlaunch tend_x_calc_kernel mini input(flux) output(tend) hip(threads=THREADS)
+    #@jwait
+    
+    @jexitdata mini updatefrom(state, tend)
+    @jwait
 end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI

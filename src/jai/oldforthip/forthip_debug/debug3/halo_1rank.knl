@@ -13,14 +13,12 @@
     enddo
 
 [hip]
-
-    int k = blockDim.x*blockIdx.x + threadIdx.x;
-    i//int k = blockIdx.x;
+ 
+    int k = blockIdx.x;
     int ll = blockIdx.y;
 
-	if (k < NZ) {
-		state[ll][k+HS][0] = state[ll][k+HS][NX+HS-2];
-		state[ll][k+HS][1] = state[ll][k+HS][NX+HS-1];
-		state[ll][k+HS][NX+2*HS-2] = state[ll][k+HS][2];
-		state[ll][k+HS][NX+2*HS-1] = state[ll][k+HS][3];
-	}
+    state[ll][k+HS][0] = state[ll][k+HS][NX+HS-2];
+    state[ll][k+HS][1] = state[ll][k+HS][NX+HS-1];
+    state[ll][k+HS][NX+2*HS-2] = state[ll][k+HS][2];
+    state[ll][k+HS][NX+2*HS-1] = state[ll][k+HS][3];
+

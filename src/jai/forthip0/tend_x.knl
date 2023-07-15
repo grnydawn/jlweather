@@ -46,7 +46,7 @@
     double stencil[4], d3_vals[NUM_VARS], vals[NUM_VARS];
 
     int i = blockDim.x*blockIdx.x + threadIdx.x;
-//    int i = blockIdx.x; //X
+    //int i = blockIdx.x; //X
     int k = blockIdx.y; //Z
     int ll, s;
 

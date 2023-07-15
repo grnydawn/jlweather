@@ -40,27 +40,17 @@
       enddo
     enddo
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !Use the fluxes to compute tendencies for each cell
-	!$acc parallel loop collapse(3) present(flux, tend) async
-!    do ll = 1 , NUM_VARS
-!      do k = 1 , nz
-!        do i = 1 , nx
-!          tend(i,k,ll) = -( flux(i+1,k,ll) - flux(i,k,ll) ) / dx
-!        enddo
-!      enddo
-!    enddo
-
 [hip]
 
     double r, u, w, t, p, hv_coef;
     double stencil[4], d3_vals[NUM_VARS], vals[NUM_VARS];
 
-    int i = blockIdx.x; //X
+    int i = blockDim.x*blockIdx.x + threadIdx.x;
+//    int i = blockIdx.x; //X
     int k = blockIdx.y; //Z
     int ll, s;
+
+	if (i <= NX) {
 
     hv_coef = -HV_BETA * DX / (16*dt);
 
@@ -83,14 +73,4 @@
     flux[ID_WMOM-1][k][i] = r*u*w   - hv_coef*d3_vals[ID_WMOM-1];
     flux[ID_RHOT-1][k][i] = r*u*t   - hv_coef*d3_vals[ID_RHOT-1];
 
-/*
-    if (k==0 &&i == 0){
-	   printf("DDDDDD %f, %f, %f, %f\n", flux[ID_DENS-1][k][i], flux[ID_UMOM-1][k][i] , flux[ID_WMOM-1][k][i] , flux[ID_RHOT-1][k][i] );
 	}
-
-    if (i < NX) {
-      for(ll=0; ll<NUM_VARS; ll++) {
-        tend[ll][k][i] = -( flux[ll][k][i+1] - flux[ll][k][i] ) / DX;
-      }
-    }
-*/

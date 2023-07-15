@@ -3,7 +3,7 @@
     integer :: k
     real(C_DOUBLE) :: z
 
-	!$acc parallel loop present(state, hy_dens_cell, hy_dens_theta_cell) async
+	!$acc parallel loop present(state, hy_dens_cell, hy_dens_theta_cell) ! async
 	do k = 1 , nz
 	  z = (k_beg-1 + k-0.5_8)*dz
 	  if (abs(z-3*zlen/4) <= zlen/16) then

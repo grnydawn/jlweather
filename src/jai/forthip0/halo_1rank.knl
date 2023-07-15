@@ -11,3 +11,16 @@
           state(nx+2,k,ll) = state(2   ,k,ll)
         enddo
     enddo
+
+[hip]
+
+    int k = blockDim.y*blockIdx.y + threadIdx.y;
+    //int k = blockIdx.y;
+    int ll = blockIdx.z;
+
+	if (k < NZ) {
+		state[ll][k+HS][0] = state[ll][k+HS][NX+HS-2];
+		state[ll][k+HS][1] = state[ll][k+HS][NX+HS-1];
+		state[ll][k+HS][NX+2*HS-2] = state[ll][k+HS][2];
+		state[ll][k+HS][NX+2*HS-1] = state[ll][k+HS][3];
+	}

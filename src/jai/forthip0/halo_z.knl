@@ -24,3 +24,27 @@
       enddo
     enddo
 
+[hip]
+
+    int i = blockDim.x*blockIdx.x + threadIdx.x;
+    //int i = blockIdx.x;  //X
+    int ll = blockIdx.y; // var
+
+	if (i < NX+2*HS) {
+		if (ll == ID_WMOM -1) {
+		  state[ll][0][i]       = 0;
+		  state[ll][1][i]       = 0;
+		  state[ll][NZ+HS][i]   = 0;
+		  state[ll][NZ+HS+1][i] = 0;
+		} else if (ll == ID_UMOM -1) {
+		  state[ll][0][i]       = state[ll][HS][i] / hy_dens_cell[HS] * hy_dens_cell[0];
+		  state[ll][1][i]       = state[ll][HS][i] / hy_dens_cell[HS] * hy_dens_cell[1];
+		  state[ll][NZ+HS][i]   = state[ll][NZ+HS-1][i] / hy_dens_cell[NZ+HS-1] * hy_dens_cell[NZ+HS];
+		  state[ll][NZ+HS+1][i] = state[ll][NZ+HS-1][i] / hy_dens_cell[NZ+HS-1] * hy_dens_cell[NZ+HS+1];
+		} else {
+		  state[ll][0][i]       = state[ll][HS][i];
+		  state[ll][1][i]       = state[ll][HS][i];
+		  state[ll][NZ+HS][i]   = state[ll][NZ+HS-1][i];
+		  state[ll][NZ+HS+1][i] = state[ll][NZ+HS-1][i];
+		}
+	}

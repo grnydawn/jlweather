@@ -11,3 +11,15 @@
         enddo
       enddo
     enddo
+
+[hip]
+
+    int s = blockIdx.x;
+    int k = blockDim.y*blockIdx.y + threadIdx.y;
+    //int k = blockIdx.y;
+    int ll = blockIdx.z;
+
+	if (k < NZ) {
+		sendbuf_l[ll][k][s] = state[ll][k+HS][s+HS];
+		sendbuf_r[ll][k][s] = state[ll][k+HS][s+NX];
+	}

@@ -1,21 +1,30 @@
 # example command: srun  -n 2 -- make
 
 #SIM_TIME := 10.0
-#OUT_FREQ := 100.0
+#SIM_TIME := 100.0
+SIM_TIME := 1000.0
+
 OUT_FREQ := 10.0
-SIM_TIME := 100.0
+#OUT_FREQ := 100.0
+
 #NX := 100
 #NZ := 50
+
 NX  := 400
 NZ  := 200
+
 #NX  := 1000
 #NZ  := 500
+
 #NX  := 1400
 #NZ  := 700
+
 #NX  := 2000
 #NZ  := 1000
+
 #NX  := 3000
 #NZ  := 1500
+
 #NX  := 4000
 #NZ  := 2000
 
@@ -30,9 +39,11 @@ DATA_SPEC_GRAVITY_WAVES   := 3
 DATA_SPEC_DENSITY_CURRENT := 5
 DATA_SPEC_INJECTION       := 6
 
-#DATA_SPEC := ${DATA_SPEC_THERMAL}
 DATA_SPEC := ${DATA_SPEC_COLLISION}
-#DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES}
+##DATA_SPEC := ${DATA_SPEC_THERMAL}
+#DATA_SPEC := ${DATA_SPEC_GRAVITY_WAVES} # not working
+#DATA_SPEC := ${DATA_SPEC_DENSITY_CURRENT}
+#DATA_SPEC := ${DATA_SPEC_INJECTION}
 
 ACCEL_TYPE := fortran_openacc
 WORK_DIR  := /lustre/orion/cli115/proj-shared/grnydawn/jaiwork

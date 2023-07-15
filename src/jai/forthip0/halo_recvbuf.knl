@@ -11,3 +11,15 @@
         enddo
       enddo
     enddo
+
+[hip]
+
+    int s = blockIdx.x;
+    int k = blockDim.y*blockIdx.y + threadIdx.y;
+    //int k = blockIdx.y;
+    int ll = blockIdx.z;
+
+	if (k < NZ) {
+		state[ll][k+HS][s] = recvbuf_l[ll][k][s];
+		state[ll][k+HS][s+NX+HS] = recvbuf_r[ll][k][s];
+	}

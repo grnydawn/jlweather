@@ -1,4 +1,4 @@
-[fortran, fortran_openacc]
+[fortran, fortran_openacc, fortran_omptarget]
 
     integer :: i,k,ll,s
     real(C_DOUBLE) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
@@ -10,8 +10,8 @@
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Compute fluxes in the x-direction for each cell
 
-	!$acc parallel loop collapse(2) private(stencil,vals,d3_vals) &
-    !$acc& present(state, hy_dens_cell, hy_dens_theta_cell, flux) async
+    !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
+    !$omp target teams distribute parallel do simd collapse(2) private(stencil,vals,d3_vals) depend(inout:asyncid) nowait
     do k = 1 , nz
       do i = 1 , nx+1
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
@@ -40,13 +40,13 @@
       enddo
     enddo
 
-[hip]
+[hip, cuda]
 
     double r, u, w, t, p, hv_coef;
     double stencil[4], d3_vals[NUM_VARS], vals[NUM_VARS];
 
     int i = blockDim.x*blockIdx.x + threadIdx.x;
-//    int i = blockIdx.x; //X
+    //int i = blockIdx.x; //X
     int k = blockIdx.y; //Z
     int ll, s;
 

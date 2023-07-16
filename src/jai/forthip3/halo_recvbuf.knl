@@ -1,8 +1,9 @@
-[fortran, fortran_openacc]
+[fortran, fortran_openacc, fortran_omptarget]
 
     integer :: s,k,ll
 
-    !$acc parallel loop collapse(3) present(state, recvbuf_l, recvbuf_r) async
+	!$acc parallel loop collapse(3) async
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do s = 1 , hs
@@ -12,12 +13,14 @@
       enddo
     enddo
 
-[hip]
+[hip, cuda]
 
     int s = blockIdx.x;
     int k = blockDim.y*blockIdx.y + threadIdx.y;
     //int k = blockIdx.y;
     int ll = blockIdx.z;
 
-    state[ll][k+HS][s] = recvbuf_l[ll][k][s];
-    state[ll][k+HS][s+NX+HS] = recvbuf_r[ll][k][s];
+	if (k < NZ) {
+		state[ll][k+HS][s] = recvbuf_l[ll][k][s];
+		state[ll][k+HS][s+NX+HS] = recvbuf_r[ll][k][s];
+	}

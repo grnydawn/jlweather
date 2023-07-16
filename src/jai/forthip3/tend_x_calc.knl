@@ -1,7 +1,9 @@
-[fortran, fortran_openacc]
+[fortran, fortran_openacc, fortran_omptarget]
 
     integer :: i,k,ll
 
+    !$acc parallel loop collapse(3) async
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
     do ll = 1 , NUM_VARS
       do k = 1 , nz
         do i = 1 , nx
@@ -10,7 +12,7 @@
       enddo
     enddo
 
-[hip]
+[hip, cuda]
 
     int i = blockDim.x*blockIdx.x + threadIdx.x;
     //int i = blockIdx.x; //X

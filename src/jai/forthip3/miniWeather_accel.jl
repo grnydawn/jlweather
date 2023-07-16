@@ -1,5 +1,6 @@
 using AccelInterfaces
 
+import Profile
 import TimerOutputs.TimerOutput,
        TimerOutputs.@timeit,
        TimerOutputs.show
@@ -34,36 +35,13 @@ import Printf.@printf
 
 import Libdl
 
-##############
-# Accelerators
-##############
-
-const THREADS_PER_BLOCK = 256
-
-const COMPILE_HIP = "hipcc -shared -fPIC -lamdhip64 -g"
-const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
-
-const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl") 
-const PATH_TEND_APPLY_KERNEL = joinpath(@__DIR__, "tend_apply.knl") 
-const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl") 
-const PATH_TEND_X_CALC_KERNEL = joinpath(@__DIR__, "tend_x_calc.knl") 
-const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl") 
-const PATH_HALO_1RANK_KERNEL = joinpath(@__DIR__, "halo_1rank.knl") 
-const PATH_HALO_SENDBUF_KERNEL = joinpath(@__DIR__, "halo_sendbuf.knl") 
-const PATH_HALO_RECVBUF_KERNEL = joinpath(@__DIR__, "halo_recvbuf.knl") 
-const PATH_HALO_INJECT_KERNEL = joinpath(@__DIR__, "halo_inject.knl") 
-const PATH_HALO_Z_KERNEL = joinpath(@__DIR__, "halo_z.knl") 
 
 ##############
 # constants
 ##############
     
 # julia command to link MPI.jl to system MPI installation
-# julia --project=. -e 'ENV["JULIA_MPI_BINARY"]="system"; 
-# ENV["JULIA_MPI_PATH"]="/opt/cray/pe/mpich/8.1.16/ofi/crayclang/10.0";
-# using Pkg; Pkg.build("MPI"; verbose=true)'
-# MPI.install_mpiexecjl()
-
+# julia -e 'ENV["JULIA_MPI_BINARY"]="system"; ENV["JULIA_MPI_PATH"]="/Users/8yk/opt/usr/local"; using Pkg; Pkg.build("MPI"; verbose=true)'
 Init()
 const COMM   = COMM_WORLD
 const NRANKS = Comm_size(COMM)
@@ -95,15 +73,16 @@ s = ArgParseSettings()
         help = "data spec"
         arg_type = Int64
         default = 2
+    "--framework", "-p"
+        help = "comma separated programming frameworks"
+        arg_type = String
+        default = "fortran"
     "--outfile", "-o"
         help = "output file path"
         default = "output.nc"
     "--workdir", "-w"
         help = "working directory path"
         default = ".jaitmp"
-    "--accel", "-a"
-        help = "accelerator type(fortran, cpp, fortran_openacc, fortran_omptarget)"
-        default = "fortran"
     "--debugdir", "-b"
         help = "debugging output directory path"
         default = ".jaitmp"
@@ -111,6 +90,28 @@ s = ArgParseSettings()
 end
 
 parsed_args = parse_args(ARGS, s)
+
+##############
+# Accelerators
+##############
+
+const HERE = @__DIR__
+
+const THREADS_PER_BLOCK = 256
+
+active_frames = split(parsed_args["framework"], ",")
+
+const COMPILE_FOMPTARGET_CRAY = "fortran_omptarget" in active_frames ? "ftn -shared -fPIC -h omp,noacc" : nothing
+const COMPILE_FOPENACC_CRAY = "fortran_openacc" in active_frames ? "ftn -shared -fPIC -h acc,noomp" : nothing
+const COMPILE_FORTRAN = "fortran" in active_frames ? "ftn -fPIC -shared -h noacc,noomp" : nothing
+const COMPILE_HIP = "hip" in active_frames ? "hipcc -shared -fPIC -lamdhip64 -g" : nothing
+const COMPILE_CUDA = "cuda" in active_frames ? "nvcc --linker-options=\"-fPIC\" --compiler-options=\"-fPIC\" --shared -g" : nothing
+
+const USE_FOMPTARGET = "fortran_omptarget" in active_frames ? true : false
+const USE_FOPENACC = "fortran_openacc" in active_frames ? true : false
+const USE_FORTRAN = "fortran" in active_frames ? true : false
+const USE_CUDA = "cuda" in active_frames ? true : false
+const USE_HIP = "hip" in active_frames ? true : false
 
 const SIM_TIME    = parsed_args["simtime"]
 const NX_GLOB     = parsed_args["nx"]
@@ -122,7 +123,6 @@ const DATA_SPEC   = parsed_args["dataspec"]
 const OUTFILE     = parsed_args["outfile"]
 const WORKDIR     = parsed_args["workdir"]
 const DEBUGDIR    = parsed_args["debugdir"]
-const ACCEL       = parsed_args["accel"]
 
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
@@ -197,7 +197,6 @@ julia> main()
 """
 function main(args::Vector{String})
 
-    #Base.GC.enable(false)
     ######################
     # top-level variables
     ######################
@@ -208,49 +207,53 @@ function main(args::Vector{String})
     local dt = DT
     local nt = Int(1)
 
-    @jaccel mini device(
+    @jaccel     framework(
+                    hip=COMPILE_HIP,
+                    cuda=COMPILE_CUDA,
+                    fortran=COMPILE_FORTRAN,
+                    fortran_omptarget=COMPILE_FOMPTARGET_CRAY,
+                    fortran_openacc=COMPILE_FOPENACC_CRAY
+                ) device(
                     MYRANK%8
                 ) constant(
                     NX, NZ, DX, DZ, HS, NUM_VARS, C0, GAMMA, P0, HV_BETA, GRAV,
                     RD, CP, CV, ID_DENS, ID_UMOM, ID_WMOM, ID_RHOT, STEN_SIZE,
                     DATA_SPEC, PI, I_BEG, K_BEG, XLEN, ZLEN, DATA_SPEC_GRAVITY_WAVES
                 ) set(
-                    master=MASTERPROC, debugdir=DEBUGDIR, workdir=WORKDIR
+                    debug=true, workdir=WORKDIR
                 )
 
-    @jkernel PATH_REDUCTION_KERNEL reduce_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_TEND_X_KERNEL tend_x_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_TEND_X_CALC_KERNEL tend_x_calc_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_TEND_Z_KERNEL tend_z_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_TEND_APPLY_KERNEL tend_apply_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_HALO_1RANK_KERNEL halo_1rank_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_HALO_SENDBUF_KERNEL halo_sendbuf_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_HALO_RECVBUF_KERNEL halo_recvbuf_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_HALO_INJECT_KERNEL halo_inject_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
-    @jkernel PATH_HALO_Z_KERNEL halo_z_kernel  mini framework(hip=COMPILE_HIP, fortran=COMPILE_FORTRAN)
+    @jkernel joinpath(HERE, "reduction.knl")    reduce_kernel  
+    @jkernel joinpath(HERE, "tend_x.knl")       tend_x_kernel  
+    @jkernel joinpath(HERE, "tend_x_calc.knl")  tend_x_calc_kernel  
+    @jkernel joinpath(HERE, "tend_z.knl")       tend_z_kernel  
+    @jkernel joinpath(HERE, "tend_z_calc.knl")  tend_z_calc_kernel  
+    @jkernel joinpath(HERE, "tend_apply.knl")   tend_apply_kernel  
+    @jkernel joinpath(HERE, "halo_1rank.knl")   halo_1rank_kernel  
+    @jkernel joinpath(HERE, "halo_sendbuf.knl") halo_sendbuf_kernel  
+    @jkernel joinpath(HERE, "halo_recvbuf.knl") halo_recvbuf_kernel  
+    @jkernel joinpath(HERE, "halo_inject.knl")  halo_inject_kernel  
+    @jkernel joinpath(HERE, "halo_z.knl")       halo_z_kernel  
 
     #Initialize the grid and the data  
     (state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l,
             sendbuf_r, recvbuf_l, recvbuf_r) = init!()
 
-	@jenterdata mini alloc(state, statetmp, flux, tend, hy_dens_cell,
+    @jenterdata  alloc(state, statetmp, flux, tend, hy_dens_cell,
             hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int,
             sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-	@jenterdata mini updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
+    @jenterdata  updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
 
     #Initial reductions for mass, kinetic energy, and total energy
-    mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
+    local mass0, te0 = reductions(state, hy_dens_cell, hy_dens_theta_cell)
 
     #Output the initial state
     output(state,etime,nt,hy_dens_cell,hy_dens_theta_cell)
 
-    @jwait mini 
     
-    elapsedtime = 0
-
     # main loop
     elapsedtime = @elapsed while etime < SIM_TIME
 
@@ -263,6 +266,9 @@ function main(args::Vector{String})
         @timeit to "timestep" perform_timestep!(state, statetmp, dt, recvbuf_l, recvbuf_r,
                   sendbuf_l, sendbuf_r, hy_dens_cell, hy_dens_theta_cell,
                   hy_dens_int, hy_dens_theta_int, hy_pressure_int)
+
+        @jexitdata  updatefrom(state, statetmp)
+        @jwait 
 
         #Update the elapsed time and output counter
         etime = etime + dt
@@ -283,28 +289,21 @@ function main(args::Vector{String})
         end
 
     end
-
-    @jexitdata mini updatefrom(state)
-    @jwait mini 
-
-    mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
  
-    if MASTERPROC
+    @jwait 
 
+    local mass, te = reductions(state, hy_dens_cell, hy_dens_theta_cell)
+
+    if MASTERPROC
         println( "CPU Time: $elapsedtime")
         @printf("d_mass: %.15e\n", (mass - mass0)/mass0)
         @printf("d_te  : %.15e\n", (te - te0)/te0)
         show(to); println("")
     end
- 
- 	@jexitdata mini delete(state, statetmp, flux, tend, hy_dens_cell, hy_dens_theta_cell,
-			hy_dens_int, hy_dens_theta_int, hy_pressure_int, sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
-    @jdecel mini 
-
+    @jdecel 
     finalize!(state)
 
-    #Base.GC.enable(true)
 end
 
 function init!()
@@ -647,7 +646,7 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
         #Compute the time tendencies for the fluid state in the x-direction
         @timeit to "tend_x" compute_tendencies_x!(state_forcing,dt, hy_dens_cell, hy_dens_theta_cell)
 
-
+        
     elseif dir == DIR_Z
         #Set the halo values for this MPI task's fluid state in the z-direction
         @timeit to "halo_z" set_halo_values_z!(state_forcing, hy_dens_cell, hy_dens_theta_cell)
@@ -657,8 +656,13 @@ function semi_discrete_step!(state_init::OffsetArray{Float64, 3, Array{Float64, 
                     hy_dens_int, hy_dens_theta_int, hy_pressure_int)
         
     end
+  
+    #Apply the tendencies to the fluid state
+    blk_x = div(NX+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+    THREADS = ((blk_x, NZ, NUM_VARS),(THREADS_PER_BLOCK, 1, 1))
+    #THREADS = ((NX, NZ, NUM_VARS),1) 
+    @timeit to "update" @jlaunch tend_apply_kernel  input(state_init, tend, hy_dens_cell, dt) output(state_out, tend) hip(threads=THREADS, enable_if=USE_HIP)
 
-     @timeit to "update" @jlaunch tend_apply_kernel mini input(state_init, tend, hy_dens_cell, dt) output(state_out, tend)
 end
 
 #Set this MPI task's halo values in the x-direction. This routine will require MPI
@@ -671,22 +675,29 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
     if NRANKS == 1
-        @jlaunch halo_1rank_kernel mini input(state) output(state)
+        blk_z = div(NZ+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+        THREADS = ((1, blk_z, NUM_VARS),(1, THREADS_PER_BLOCK, 1))
+        #THREADS = ((1, NZ, NUM_VARS), 1)
+        @jlaunch halo_1rank_kernel  input(state) output(state) hip(threads=THREADS, enable_if=USE_HIP)
         return
     end
 
     local req_r = Vector{Request}(undef, 2)
     local req_s = Vector{Request}(undef, 2)
+
     
     #Prepost receives
     req_r[1] = Irecv!(recvbuf_l, LEFT_RANK,0,COMM)
     req_r[2] = Irecv!(recvbuf_r,RIGHT_RANK,1,COMM)
 
     #Pack the send buffers
-    #@jlaunch halo_sendbuf_kernel mini input(state) output(sendbuf_l, sendbuf_r)
-
-    #@jexitdata mini updatefrom(sendbuf_l, sendbuf_r) async
-    #@jwait mini
+    blk_z = div(NZ+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+    THREADS = ((HS, blk_z, NUM_VARS),(1, THREADS_PER_BLOCK, 1))
+    #THREADS = ((HS, NZ, NUM_VARS), 1)
+    @jlaunch halo_sendbuf_kernel  input(state) output(sendbuf_l, sendbuf_r
+                    ) hip(threads=THREADS, enable_if=USE_HIP)
+    @jexitdata updatefrom(sendbuf_l, sendbuf_r)
+    @jwait
 
     #Fire off the sends
     req_s[1] = Isend(sendbuf_l, LEFT_RANK,1,COMM)
@@ -695,20 +706,29 @@ function set_halo_values_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
     #Wait for receives to finish
     local statuses = Waitall!(req_r)
 
-    #@jenterdata mini updateto(recvbuf_l,recvbuf_r) async
+    @jenterdata updateto(recvbuf_l, recvbuf_r)
+    @jwait
 
     #Unpack the receive buffers
-    #@jlaunch halo_recvbuf_kernel mini input(recvbuf_l, recvbuf_r) output(state,)
+    blk_z = div(NZ+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+    THREADS = ((HS, blk_z, NUM_VARS),(1, THREADS_PER_BLOCK, 1))
+    #THREADS = ((HS, NZ, NUM_VARS), 1)
+    @jlaunch halo_recvbuf_kernel  input(recvbuf_l, recvbuf_r) output(state
+                    ) hip(threads=THREADS, enable_if=USE_HIP)
 
     #Wait for sends to finish
     local statuses = Waitall!(req_s)
+
     
     if (DATA_SPEC == DATA_SPEC_INJECTION)
        if (MYRANK == 0)
-          @jlaunch halo_inject_kernel mini input(state, hy_dens_cell, hy_dens_theta_cell) output(state,)
+            blk_z = div(NZ+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+            THREADS = ((1, blk_z, 1),(1, THREADS_PER_BLOCK, 1))
+            #THREADS = ((1, NZ, 1), 1)
+            @jlaunch halo_inject_kernel  input(state, hy_dens_cell,
+                        hy_dens_theta_cell) output(state) hip(threads=THREADS, enable_if=USE_HIP)
        end
     end
- 
 end
 
 function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
@@ -716,23 +736,22 @@ function compute_tendencies_x!(state::OffsetArray{Float64, 3, Array{Float64, 3}}
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
 
-    @jenterdata mini updateto(state)
-    #@jwait
+    #@jenterdata  updateto(state)
 
-    blk_x = div((NX+1), THREADS_PER_BLOCK) + 1
-    THREADS = ((blk_x, NZ),THREADS_PER_BLOCK)
+    blk_x = div((NX+1)+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+    THREADS = ((blk_x, NZ, 1), (THREADS_PER_BLOCK, 1, 1))
     #THREADS = ((NX+1, NZ), 1)
-    @jlaunch tend_x_kernel mini input(state, dt,hy_dens_cell, hy_dens_theta_cell) output(flux, tend) hip(threads=THREADS)
-    #@jwait
+    @jlaunch tend_x_kernel  input(state, dt,hy_dens_cell, hy_dens_theta_cell
+                    ) output(flux, tend) hip(threads=THREADS, enable_if=USE_HIP) 
 
-    blk_x = div(NX, THREADS_PER_BLOCK) + 1
-    THREADS = ((blk_x, NZ),THREADS_PER_BLOCK)
+    blk_x = div(NX+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK)
+    THREADS = ((blk_x, NZ, NUM_VARS),(THREADS_PER_BLOCK, 1, 1))
     #THREADS = ((NX, NZ, NUM_VARS),1)
-    @jlaunch tend_x_calc_kernel mini input(flux) output(tend) hip(threads=THREADS)
-    #@jwait
-    
-    @jexitdata mini updatefrom(state, tend)
-    @jwait
+    @jlaunch tend_x_calc_kernel  input(flux) output(tend) hip(threads=THREADS, enable_if=USE_HIP) 
+
+    #@jexitdata  updatefrom(tend)
+    #@jwait 
+
 end
 
 #Set this MPI task's halo values in the z-direction. This does not require MPI because there is no MPI
@@ -740,30 +759,51 @@ end
 function set_halo_values_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
-    
-    @jlaunch halo_z_kernel mini input(state, hy_dens_cell) output(state,)
 
+    #@jenterdata  updateto(state)
+
+    blk_x = div(NX+2*HS+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK)
+    THREADS = ((blk_x, NUM_VARS),(THREADS_PER_BLOCK, 1, 1))
+    #THREADS = ((NX+2*HS, NUM_VARS),1)
+    @jlaunch halo_z_kernel  input(state, hy_dens_cell) output(state) hip(threads=THREADS, enable_if=USE_HIP)
+
+    #@jexitdata  updatefrom(state)
+    #@jwait 
 end
-
+        
 function compute_tendencies_z!(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     dt::Float64,
                     hy_dens_int::Vector{Float64},
                     hy_dens_theta_int::Vector{Float64},
                     hy_pressure_int::Vector{Float64})
+    
+    #@jenterdata  updateto(state)
 
-    @jlaunch tend_z_kernel mini input(state, dt, hy_dens_int, hy_dens_theta_int, hy_pressure_int) output(flux, tend)
+    blk_x = div(NX+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK) 
+    THREADS = ((blk_x, NZ+1, 1), (THREADS_PER_BLOCK, 1, 1))
+    #THREADS = ((NX, NZ+1),1)
+    @jlaunch tend_z_kernel  input(state, dt,hy_dens_int, hy_dens_theta_int,
+                    hy_pressure_int) output(flux, tend) hip(threads=THREADS, enable_if=USE_HIP)
+
+    blk_x = div(NX+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK)
+    THREADS = ((blk_x, NZ, NUM_VARS),(THREADS_PER_BLOCK, 1, 1))
+    #THREADS = ((NX, NZ, NUM_VARS),1)
+    @jlaunch tend_z_calc_kernel  input(state, flux) output(tend) hip(threads=THREADS, enable_if=USE_HIP)
+
+    #@jexitdata  updatefrom(tend)
+    #@jwait 
+
 end
 
 function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
     
-    local mass = zero(Float64)
-    local te = zero(Float64)
+    local mass, te, r, u, w, th, p, t, ke, le = [zero(Float64) for _ in 1:10] 
     glob = Array{Float64}(undef, 2)
-
-    @jlaunch reduce_kernel mini input(state, hy_dens_cell, hy_dens_theta_cell) output(glob)
-
+    
+    @jlaunch reduce_kernel  input(state, hy_dens_cell, hy_dens_theta_cell) output(glob)
+    
     mass = glob[1]
     te = glob[2]
 
@@ -778,8 +818,6 @@ function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                 nt::Int,
                 hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                 hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
-
-    @jexitdata mini updatefrom(state)
 
     var_local  = zeros(Float64, NX, NZ, NUM_VARS)
 

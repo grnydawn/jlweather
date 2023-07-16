@@ -1,8 +1,8 @@
 # example command: srun  -n 2 -- make
 
 #SIM_TIME := 10.0
-#SIM_TIME := 100.0
-SIM_TIME := 1000.0
+SIM_TIME := 100.0
+#SIM_TIME := 1000.0
 
 OUT_FREQ := 10.0
 #OUT_FREQ := 100.0
@@ -88,7 +88,8 @@ jai_fortran:
 	echo "*** JAI FORTRAN ***"
 	${JULIA} --color=yes -- ${JAIFORTRANSRC} ${ARGS}
 
-jai_forthip0:
+jai_hip0:
+	echo "*** JAI HIP ***"
 	${JULIA} --color=yes -- ${JAIFORTHIP0SRC} ${ARGS}
 
 jai_forthip1:
@@ -101,7 +102,7 @@ jai_julia2:
 	${JULIA} --color=yes -- ${JAIJULIA2SRC} ${ARGS}
 
 jai_forthip3:
-	${JULIA} --color=yes -- ${JAIFORTHIP3SRC} ${ARGS}
+	${JULIA} --color=yes -- ${JAIFORTHIP3SRC} -p fortran_openacc ${ARGS}
 
 jai_fomp1:
 	echo "*** JAI FORTRAN OPENMP TARGET ***"
@@ -145,4 +146,4 @@ all: fort fortacc julia jai
 	./ miniweather_fortacc.exe
 
 clean:
-	rm -rf *.so core *.mod .jaitmp *.o *.s *.exe output.nc data_roofline
+	rm -rf *.so core *.mod .jaitmp *.o *.s *.exe output.nc data_roofline results.csv

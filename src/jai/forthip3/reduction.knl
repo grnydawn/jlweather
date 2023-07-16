@@ -1,4 +1,4 @@
-[fortran, fortran_openacc]
+[fortran, fortran_openacc, fortran_omptarget]
 
     integer :: i, k, ierr
     real(C_DOUBLE) :: r,u,w,th,p,t,ke,ie, mass, te

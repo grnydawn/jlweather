@@ -1,4 +1,4 @@
-[fortran, fortran_openacc]
+[fortran, fortran_openacc, fortran_omptarget]
 
     integer :: i,k,ll,s
     real(C_DOUBLE) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
@@ -10,8 +10,8 @@
     !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !Compute fluxes in the x-direction for each cell
 
-	!$acc parallel loop collapse(2) private(stencil,vals,d3_vals) &
-    !$acc& present(state, hy_dens_int, hy_dens_theta_int, hy_pressure_int, flux) async
+	!$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
+    !$omp target teams distribute parallel do simd collapse(2) private(stencil,vals,d3_vals) depend(inout:asyncid) nowait
     do k = 1 , nz+1
       do i = 1 , nx
         !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
@@ -45,18 +45,42 @@
       enddo
     enddo
 
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !! TODO: THREAD ME
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !Use the fluxes to compute tendencies for each cell
-	!$acc parallel loop collapse(3) present(flux, state, tend) async
-    do ll = 1 , NUM_VARS
-      do k = 1 , nz
-        do i = 1 , nx
-          tend(i,k,ll) = -( flux(i,k+1,ll) - flux(i,k,ll) ) / dz
-          if (ll == ID_WMOM) then
-            tend(i,k,ID_WMOM) = tend(i,k,ID_WMOM) - state(i,k,ID_DENS)*grav
-          endif
-        enddo
-      enddo
-    enddo
+
+[hip, cuda]
+
+    double r, u, w, t, p, hv_coef;
+    double stencil[4], d3_vals[NUM_VARS], vals[NUM_VARS];
+
+    //THREADS = ((NZ+1, NX),1)
+    int i = blockDim.x*blockIdx.x + threadIdx.x;
+    //int i = blockIdx.x; //Z
+    int k = blockIdx.y; //X
+    int ll, s;
+
+	if (i < NX) {
+		hv_coef = -HV_BETA * DZ / (16.0*dt);
+
+		for (ll=0; ll<NUM_VARS; ll++) {
+		  for (s=0; s<STEN_SIZE; s++) {
+			  stencil[s] = state[ll][k+s][i+HS];
+		  }
+		  vals[ll] = (-stencil[0]/12.0) + 7.0*stencil[1]/12.0 + 7.0*stencil[2]/12.0 - stencil[3]/12.0;
+		  d3_vals[ll] = (-stencil[0]) + 3.0*stencil[1] - 3.0*stencil[2] + stencil[3];
+		}
+
+		r = vals[ID_DENS-1] + hy_dens_int[k];
+		u = vals[ID_UMOM-1] / r;
+		w = vals[ID_WMOM-1] / r;
+		t = ( vals[ID_RHOT-1] + hy_dens_theta_int[k] ) / r;
+		p = C0 * pow((r*t), GAMMA) - hy_pressure_int[k];
+
+		if (k == 0 || k == NZ) {
+		  w                = 0.0;
+		  d3_vals[ID_DENS-1] = 0.0;
+		}
+
+		flux[ID_DENS-1][k][i] = r*w     - hv_coef*d3_vals[ID_DENS-1];
+		flux[ID_UMOM-1][k][i] = r*w*u   - hv_coef*d3_vals[ID_UMOM-1];
+		flux[ID_WMOM-1][k][i] = r*w*w+p - hv_coef*d3_vals[ID_WMOM-1];
+		flux[ID_RHOT-1][k][i] = r*w*t   - hv_coef*d3_vals[ID_RHOT-1];
+	}

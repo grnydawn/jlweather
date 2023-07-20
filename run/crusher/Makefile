@@ -4,14 +4,14 @@
 SIM_TIME := 100.0
 #SIM_TIME := 1000.0
 
-OUT_FREQ := 10.0
-#OUT_FREQ := 100.0
+#OUT_FREQ := 10.0
+OUT_FREQ := 100.0
 
 #NX := 100
 #NZ := 50
 
-NX  := 400
-NZ  := 200
+#NX  := 400
+#NZ  := 200
 
 #NX  := 1000
 #NZ  := 500
@@ -25,8 +25,8 @@ NZ  := 200
 #NX  := 3000
 #NZ  := 1500
 
-#NX  := 4000
-#NZ  := 2000
+NX  := 4000
+NZ  := 2000
 
 #SIM_TIME := 10.0 #10.0
 #OUT_FREQ := 10.0 # 10.0
@@ -50,8 +50,8 @@ WORK_DIR  := /lustre/orion/cli115/proj-shared/grnydawn/jaiwork
 DEBUG_DIR := ${WORK_DIR}
 OUT_FILE  := /lustre/orion/cli115/proj-shared/grnydawn/output.nc
 
-JULIA := julia --project=. --check-bounds=no
-#JULIA := julia --project=.
+#JULIA := julia --project=. --check-bounds=no
+JULIA := julia --project=.
 
 SRCDIR :=../../src
 JAIFORTRANSRC := ${SRCDIR}/jai/fortran/miniWeather_accel.jl
@@ -93,16 +93,13 @@ jai_hip0:
 	${JULIA} --color=yes -- ${JAIFORTHIP0SRC} ${ARGS}
 
 jai_forthip1:
-	${JULIA} --color=yes -- ${JAIFORTHIP1SRC} ${ARGS}
+	${JULIA} --color=yes -- ${JAIFORTHIP1SRC} -p hip,fortran ${ARGS}
 
 jai_forthip2:
-	${JULIA} --color=yes -- ${JAIFORTHIP2SRC} ${ARGS}
-
-jai_julia2:
-	${JULIA} --color=yes -- ${JAIJULIA2SRC} ${ARGS}
+	${JULIA} --color=yes -- ${JAIFORTHIP2SRC} -p hip,fortran ${ARGS}
 
 jai_forthip3:
-	${JULIA} --color=yes -- ${JAIFORTHIP3SRC} -p fortran_openacc ${ARGS}
+	${JULIA} --color=yes -- ${JAIFORTHIP3SRC} -p hip,fortran ${ARGS}
 
 jai_fomp1:
 	echo "*** JAI FORTRAN OPENMP TARGET ***"

@@ -1,0 +1,15 @@
+[fortran, fortran_openacc, fortran_omptarget]
+
+    integer :: s,k,ll
+
+	!$acc parallel loop collapse(3) async
+    !$omp target teams distribute parallel do simd collapse(3)  depend(inout:asyncid) nowait
+    do ll = 1 , NUM_VARS
+      do k = 1 , nz
+        do s = 1 , hs
+          sendbuf_l(s,k,ll) = state(s      ,k,ll)
+          sendbuf_r(s,k,ll) = state(nx-hs+s,k,ll)
+        enddo
+      enddo
+    enddo
+

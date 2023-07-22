@@ -177,7 +177,6 @@ const to = TimerOutput()
     
 const flux        = zeros(Float64, NX+1, NZ+1, NUM_VARS) 
 const tend        = zeros(Float64, NX, NZ, NUM_VARS) 
-const glob        = Array{Float64}(undef, 2)
 
 ##############
 # functions
@@ -221,7 +220,7 @@ function main(args::Vector{String})
                     debug=true, workdir=WORKDIR
                 )
 
-    @jkernel joinpath(HERE, "reduction.knl")    reduce_kernel
+    #@jkernel joinpath(HERE, "reduction.knl")    reduce_kernel
     @jkernel joinpath(HERE, "tend_x.knl")       tend_x_kernel
     @jkernel joinpath(HERE, "tend_x_calc.knl")  tend_x_calc_kernel
     @jkernel joinpath(HERE, "tend_z.knl")       tend_z_kernel
@@ -240,7 +239,7 @@ function main(args::Vector{String})
 
 	@jenterdata  alloc(state, statetmp, flux, tend, hy_dens_cell,
             hy_dens_theta_cell, hy_dens_int, hy_dens_theta_int, hy_pressure_int,
-            sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r, glob)
+            sendbuf_l, sendbuf_r, recvbuf_l, recvbuf_r)
 
 	@jenterdata  updateto(state, statetmp, hy_dens_cell, hy_dens_theta_cell,
             hy_dens_int, hy_dens_theta_int, hy_pressure_int)
@@ -795,26 +794,53 @@ end
 function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
                     hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
                     hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
-    
-    local mass = zero(Float64)
-    local te = zero(Float64)
 
-    blk_z = div(NZ+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK)
-    THREADS = ((NX, blk_z),(1, THREADS_PER_BLOCK, 1))
+    local mass, te, r, u, w, th, p, t, ke, le = [zero(Float64) for _ in 1:10]
+    glob = Array{Float64}(undef, 2)
 
-    @jlaunch reduce_kernel  input(state, hy_dens_cell, hy_dens_theta_cell) output(glob) hip(
-            threads=THREADS, enable_if=USE_HIP) cuda(threads=THREADS, enable_if=USE_CUDA)
-
-    @jexitdata updatefrom(glob)
-    @jwait
-
-    mass = glob[1]
-    te = glob[2]
+    for k in 1:NZ
+        for i in 1:NX
+            r  =   state[i,k,ID_DENS] + hy_dens_cell[k]             # Density
+            u  =   state[i,k,ID_UMOM] / r                           # U-wind
+            w  =   state[i,k,ID_WMOM] / r                           # W-wind
+            th = ( state[i,k,ID_RHOT] + hy_dens_theta_cell[k] ) / r # Potential Temperature (theta)
+            p  = C0*(r*th)^GAMMA      # Pressure
+            t  = th / (P0/p)^(RD/CP)  # Temperature
+            ke = r*(u*u+w*w)          # Kinetic Energy
+            ie = r*CV*t               # Internal Energy
+            mass = mass + r            *DX*DZ # Accumulate domain mass
+            te   = te   + (ke + r*CV*t)*DX*DZ # Accumulate domain total energy
+        end
+    end
 
     Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
-    
+
     return glob
 end
+
+#function reductions(state::OffsetArray{Float64, 3, Array{Float64, 3}},
+#                    hy_dens_cell::OffsetVector{Float64, Vector{Float64}},
+#                    hy_dens_theta_cell::OffsetVector{Float64, Vector{Float64}})
+#    
+#    local mass = zero(Float64)
+#    local te = zero(Float64)
+#
+#    blk_z = div(NZ+THREADS_PER_BLOCK-1, THREADS_PER_BLOCK)
+#    THREADS = ((NX, blk_z),(1, THREADS_PER_BLOCK, 1))
+#
+#    @jlaunch reduce_kernel  input(state, hy_dens_cell, hy_dens_theta_cell) output(glob) hip(
+#            threads=THREADS, enable_if=USE_HIP) cuda(threads=THREADS, enable_if=USE_CUDA)
+#
+#    @jexitdata updatefrom(glob)
+#    @jwait
+#
+#    mass = glob[1]
+#    te = glob[2]
+#
+#    Allreduce!(Array{Float64}([mass,te]), glob, +, COMM)
+#    
+#    return glob
+#end
 
 #Output the fluid state (state) to a NetCDF file at a given elapsed model time (etime)
 function output(state::OffsetArray{Float64, 3, Array{Float64, 3}},

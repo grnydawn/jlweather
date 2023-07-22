@@ -1,0 +1,28 @@
+[fortran, fortran_omptarget, fortran_openacc]
+
+    integer :: s,k,ll
+
+    !Unpack the receive buffers
+    !$acc parallel loop collapse(3) async
+    !$omp target teams distribute parallel do simd collapse(3) depend(inout:asyncid) nowait
+    do ll = 1 , NUM_VARS
+      do k = 1 , nz
+        do s = 1 , hs
+          state(-hs+s,k,ll) = recvbuf_l(s,k,ll)
+          state(nx+s ,k,ll) = recvbuf_r(s,k,ll)
+        enddo
+      enddo
+    enddo
+
+[hip, cuda]
+
+    int s = blockIdx.x;
+    int k = blockDim.y*blockIdx.y + threadIdx.y;
+    //int k = blockIdx.y;
+    int ll = blockIdx.z;
+
+    if (k < NZ) {
+        state[ll][k+HS][s] = recvbuf_l[ll][k][s];
+        state[ll][k+HS][s+NX+HS] = recvbuf_r[ll][k][s];
+    }
+~       

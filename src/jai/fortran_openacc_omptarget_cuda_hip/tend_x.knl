@@ -1,0 +1,72 @@
+[fortran, fortran_omptarget, fortran_openacc]
+
+    integer :: i,k,ll,s
+    real(C_DOUBLE) :: r,u,w,t,p, stencil(4), d3_vals(NUM_VARS), vals(NUM_VARS), hv_coef
+
+    !Compute the hyperviscosity coeficient
+    hv_coef = -hv_beta * dx / (16*dt)
+    !Compute fluxes in the x-direction for each cell
+    !$acc parallel loop collapse(2) private(stencil,vals,d3_vals) async
+    !$omp target teams distribute parallel do simd collapse(2) private(stencil,vals,d3_vals) depend(inout:asyncid) nowait
+    do k = 1 , nz
+      do i = 1 , nx+1
+        !Use fourth-order interpolation from four cell averages to compute the value at the interface in question
+        do ll = 1 , NUM_VARS
+          do s = 1 , sten_size
+            stencil(s) = state(i-hs-1+s,k,ll)
+          enddo
+          !Fourth-order-accurate interpolation of the state
+          vals(ll) = -stencil(1)/12 + 7*stencil(2)/12 + 7*stencil(3)/12 - stencil(4)/12
+          !First-order-accurate interpolation of the third spatial derivative of the state (for artificial viscosity)
+          d3_vals(ll) = -stencil(1) + 3*stencil(2) - 3*stencil(3) + stencil(4)
+        enddo
+
+        !Compute density, u-wind, w-wind, potential temperature, and pressure (r,u,w,t,p respectively)
+        r = vals(ID_DENS) + hy_dens_cell(k)
+        u = vals(ID_UMOM) / r
+        w = vals(ID_WMOM) / r
+        t = ( vals(ID_RHOT) + hy_dens_theta_cell(k) ) / r
+        p = C0*(r*t)**gamma
+
+        !Compute the flux vector
+        flux(i,k,ID_DENS) = r*u     - hv_coef*d3_vals(ID_DENS)
+        flux(i,k,ID_UMOM) = r*u*u+p - hv_coef*d3_vals(ID_UMOM)
+        flux(i,k,ID_WMOM) = r*u*w   - hv_coef*d3_vals(ID_WMOM)
+        flux(i,k,ID_RHOT) = r*u*t   - hv_coef*d3_vals(ID_RHOT)
+      enddo
+    enddo
+
+[hip, cuda]
+
+    double r, u, w, t, p, hv_coef;
+    double stencil[4], d3_vals[NUM_VARS], vals[NUM_VARS];
+
+    int i = blockDim.x*blockIdx.x + threadIdx.x;
+    //int i = blockIdx.x; //X
+    int k = blockIdx.y; //Z
+    int ll, s;
+
+    if (i <= NX) {
+
+    hv_coef = -HV_BETA * DX / (16*dt);
+
+    for (ll=0; ll<NUM_VARS; ll++) {
+      for (s=0; s<STEN_SIZE; s++) {
+          stencil[s] = state[ll][k+HS][i+s];
+      }
+      vals[ll] = -stencil[0]/12 + 7*stencil[1]/12 + 7*stencil[2]/12 - stencil[3]/12;
+      d3_vals[ll] = -stencil[0] + 3*stencil[1] - 3*stencil[2] + stencil[3];
+    }
+
+    r = vals[ID_DENS-1] + hy_dens_cell[k+HS];
+    u = vals[ID_UMOM-1] / r;
+    w = vals[ID_WMOM-1] / r;
+    t = (vals[ID_RHOT-1] + hy_dens_theta_cell[k+HS] ) / r;
+    p = C0 * pow(r*t, GAMMA);
+
+    flux[ID_DENS-1][k][i] = r*u     - hv_coef*d3_vals[ID_DENS-1];
+    flux[ID_UMOM-1][k][i] = r*u*u+p - hv_coef*d3_vals[ID_UMOM-1];
+    flux[ID_WMOM-1][k][i] = r*u*w   - hv_coef*d3_vals[ID_WMOM-1];
+    flux[ID_RHOT-1][k][i] = r*u*t   - hv_coef*d3_vals[ID_RHOT-1];
+
+    }

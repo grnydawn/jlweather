@@ -1,0 +1,53 @@
+[fortran, fortran_omptarget, fortran_openacc]
+
+    integer :: i, k, ierr
+    real(C_DOUBLE) :: r,u,w,th,p,t,ke,ie, mass, te
+
+	mass = 0.
+	te = 0.
+
+    !$acc parallel loop collapse(2) reduction(+:mass,te)
+    !$omp target teams distribute parallel do simd collapse(2) reduction(+:mass,te)
+    do k = 1 , nz
+      do i = 1 , nx
+        r  =   state(i,k,ID_DENS) + hy_dens_cell(k)             ! Density
+        u  =   state(i,k,ID_UMOM) / r                           ! U-wind
+        w  =   state(i,k,ID_WMOM) / r                           ! W-wind
+        th = ( state(i,k,ID_RHOT) + hy_dens_theta_cell(k) ) / r ! Potential Temperature (theta)
+        p  = C0*(r*th)**gamma      ! Pressure
+        t  = th / (p0/p)**(rd/cp)  ! Temperature
+        ke = r*(u*u+w*w)           ! Kinetic Energy
+        ie = r*cv*t                ! Internal Energy
+        mass = mass + r            *dx*dz ! Accumulate domain mass
+        te   = te   + (ke + r*cv*t)*dx*dz ! Accumulate domain total energy
+      enddo
+    enddo
+
+	glob(1) = mass
+	glob(2) = te
+
+[hip, cuda]
+
+    double r,u,w,th,p,t,ke,ie;
+
+    int i = blockIdx.x;
+    int k = blockDim.y*blockIdx.y + threadIdx.y;
+
+	glob[0] = 0.0;  // mass
+	glob[1] = 0.0;  // te
+
+	if (k < NZ) {
+		r  =   state[ID_DENS-1][k+HS][i+HS] + hy_dens_cell[k+HS];         // Density
+		u  =   state[ID_UMOM-1][k+HS][i+HS] / r;                          // U-wind
+		w  =   state[ID_WMOM-1][k+HS][i+HS] / r;                           // W-wind
+		th = ( state[ID_RHOT-1][k+HS][i+HS] + hy_dens_theta_cell[k+HS] ) / r; // Potential Temperature (theta)
+		p  = C0*pow(r*th, GAMMA);   // Pressure
+		t  = th / pow(P0/p, RD/CP); // Temperature
+		ke = r*(u*u+w*w);           // Kinetic Energy
+		ie = r*CV*t;                // Internal Energy
+////////
+// reduction failure due to dependency
+		glob[0] = glob[0] + r            *DX*DZ; // Accumulate domain mass
+		glob[1] = glob[1] + (ke + r*CV*t)*DX*DZ; // Accumulate domain total energy
+////////
+	}

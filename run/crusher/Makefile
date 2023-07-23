@@ -1,32 +1,59 @@
-# example command: srun  -n 2 -- make
 
-#SIM_TIME := 10.0
-SIM_TIME := 100.0
-#SIM_TIME := 1000.0
+FORTRAN    ?=
+FOPENACC   ?=
+FOMPTARGET ?=
+CUDA       ?=
+HIP        ?=
 
-OUT_FREQ := 10.0
-#OUT_FREQ := 100.0
+ARGS :=
 
-#NX := 100
-#NZ := 50
+ifneq ("${FORTRAN}", "")
+    ARGS := ${ARGS} --fortran="${FORTRAN}"
+endif
 
-NX  := 400
-NZ  := 200
+ifneq ("${FOPENACC}", "")
+    ARGS := ${ARGS} --fopenacc="${FOPENACC}"
+endif
 
-#NX  := 1000
-#NZ  := 500
+ifneq ("${FOMPTARGET}", "")
+    ARGS := ${ARGS} --fomptarget="${FOMPTARGET}"
+endif
 
-#NX  := 1400
-#NZ  := 700
+ifneq ("${CUDA}", "")
+    ARGS := ${ARGS} --cuda="${CUDA}"
+endif
 
-#NX  := 2000
-#NZ  := 1000
+ifneq ("${HIP}", "")
+    ARGS := ${ARGS} --hip="${HIP}"
+endif
 
-#NX  := 3000
-#NZ  := 1500
+#SIM_TIME ?= 10.0
+SIM_TIME ?= 100.0
+#SIM_TIME ?= 1000.0
 
-#NX  := 4000
-#NZ  := 2000
+OUT_FREQ ?= 10.0
+#OUT_FREQ ?= 100.0
+
+#NX ?= 100
+#NZ ?= 50
+
+NX  ?= 400
+NZ  ?= 200
+
+#NX  ?= 1000
+#NZ  ?= 500
+
+#NX  ?= 1400
+#NZ  ?= 700
+
+#NX  ?= 2000
+#NZ  ?= 1000
+
+#NX  ?= 3000
+#NZ  ?= 1500
+
+#NX  ?= 4000
+#NZ  ?= 2000
 
 DATA_SPEC_COLLISION       := 1
 DATA_SPEC_THERMAL         := 2
@@ -40,10 +67,9 @@ DATA_SPEC := ${DATA_SPEC_COLLISION}
 #DATA_SPEC := ${DATA_SPEC_DENSITY_CURRENT}
 #DATA_SPEC := ${DATA_SPEC_INJECTION}
 
-ACCEL_TYPE := fortran_openacc
-WORK_DIR  := /lustre/orion/cli115/proj-shared/grnydawn/jaiwork
+WORK_DIR  ?= ./jaiwork
 DEBUG_DIR := ${WORK_DIR}
-OUT_FILE  := /lustre/orion/cli115/proj-shared/grnydawn/output.nc
+OUT_FILE  := ${WORK_DIR}/output.nc
 
 JULIA := julia --project=. --check-bounds=no
 #JULIA := julia --project=.
@@ -51,82 +77,66 @@ JULIA := julia --project=. --check-bounds=no
 SRCDIR :=../../src
 JAIALLSRC := ${SRCDIR}/jai/fortran_openacc_omptarget_cuda_hip/miniWeather_accel.jl
 JAIFORTRANSRC := ${SRCDIR}/jai/fortran/miniWeather_accel.jl
-JAIFORTHIP1SRC := ${SRCDIR}/jai/forthip1/miniWeather_accel.jl
-JAIFORTHIP2SRC := ${SRCDIR}/jai/forthip2/miniWeather_accel.jl
-JAIJULIA2SRC := ${SRCDIR}/jai/forthip2/miniWeather_julia.jl
+JAIFORTHIP1SRC := ${SRCDIR}/jai/fortran_hip_ver1/miniWeather_accel.jl
+JAIFORTHIP2SRC := ${SRCDIR}/jai/fortran_hip_ver2/miniWeather_accel.jl
 JAIFORTOMPSRC := ${SRCDIR}/jai/fortran_omptarget/miniWeather_accel.jl
 JAIFORTACCSRC := ${SRCDIR}/jai/fortran_openacc/miniWeather_accel.jl
-JLSRC := ${SRCDIR}/julia/miniWeather_mpi.jl
+JULIASRC := ${SRCDIR}/julia/miniWeather_mpi.jl
 FORTSRC := ${SRCDIR}/fortran/miniWeather_mpi.F90
 FORTACCSRC := ${SRCDIR}/fortran/miniWeather_mpi_openacc.F90
 FORTOMPSRC := ${SRCDIR}/fortran/miniWeather_mpi_openmp45.F90
 MANUALJLSRC := ${SRCDIR}/manual/miniWeather_openacc.jl
 MANUALFORTSRC := ${SRCDIR}/manual/openacc_driver_${NX}x${NZ}.F90
 
-ACCEL ?= fortran
-
-ARGS := -s ${SIM_TIME} -x ${NX} -z ${NZ} -f ${OUT_FREQ} \
+SIM_OPTS := -s ${SIM_TIME} -x ${NX} -z ${NZ} -f ${OUT_FREQ} \
 		-d ${DATA_SPEC} -o ${OUT_FILE} -w ${WORK_DIR} \
 		-b ${DEBUG_DIR}
+ARGS := ${ARGS} ${SIM_OPTS}
 
-CC := cc
-CXX := CC
-FC := ftn
-
-INCLUDES := -I${OLCF_PARALLEL_NETCDF_ROOT}/include
-LIBS := -L${OLCF_PARALLEL_NETCDF_ROOT}/lib -lpnetcdf
+FC ?= gfortran
 MACROS := -D_NX=${NX} -D_NZ=${NZ} -D_SIM_TIME=${SIM_TIME} -D_OUT_FREQ=${OUT_FREQ} -D_DATA_SPEC=${DATA_SPEC}
 
-F_FLAGS := ${INCLUDES} ${LIBS} ${MACROS}
+F_FLAGS ?= -I${OLCF_PARALLEL_NETCDF_ROOT}/include -L${OLCF_PARALLEL_NETCDF_ROOT}/lib -lpnetcdf ${MACROS}
 
 jai_all:
-	echo "*** JAI ALL-${ACCEL} ***"
-	${JULIA} --color=yes -- ${JAIALLSRC} ${ARGS} -a ${ACCEL}
+	echo "*** JAI ALL ***"
+	${JULIA} ${JAIALLSRC} ${ARGS}
 
 jai_fortran:
 	echo "*** JAI FORTRAN ***"
-	${JULIA} --color=yes -- ${JAIFORTRANSRC} ${ARGS}
+	${JULIA} ${JAIFORTRANSRC} ${ARGS}
 
 jai_fhip1:
-	${JULIA} --color=yes -- ${JAIFORTHIP1SRC} -p hip,fortran ${ARGS}
+	echo "*** JAI FORTRAN HIP 1 ***"
+	${JULIA} ${JAIFORTHIP1SRC} ${ARGS}
 
 jai_fhip2:
-	${JULIA} --color=yes -- ${JAIFORTHIP2SRC} -p hip,fortran ${ARGS}
-
-jai_fomp:
-	echo "*** JAI FORTRAN OPENMP TARGET ***"
-	${JULIA} --color=yes -- ${JAIFORTOMPSRC} ${ARGS}
-
-jai_facc:
-	echo "*** JAI FORTRAN OPENACC ***"
-	${JULIA} --color=yes -- ${JAIFORTACCSRC} ${ARGS}
+	echo "*** JAI FORTRAN HIP 2 ***"
+	${JULIA} ${JAIFORTHIP2SRC} ${ARGS}
 
 julia:
 	echo "*** JULIA ***"
-	${JULIA} --color=yes -- ${JLSRC} ${ARGS}
+	${JULIA} ${JULIASRC} ${ARGS}
 
 fortran: ${FORTSRC}
 	echo "*** FORTRAN ***"
-	${FC} ${F_FLAGS} -DNO_INFORM -h noacc,noomp -o miniweather_fort.exe $<
-
-facc: ${FORTACCSRC}
-	echo "*** FORTRAN OPENACC ***"
-	${FC} ${F_FLAGS} -DNO_INFORM -h acc,noomp -o miniweather_fortacc.exe $<
-
-fomp: ${FORTOMPSRC}
-	echo "*** FORTRAN OPENMP TARGET ***"
-	${FC} ${F_FLAGS} -DNO_INFORM -h noacc,omp -o miniweather_fortomp.exe $<
-
-manual: ${MANUALFORTSRC}
-	ftn -shared -fPIC -h acc,noomp -o ${WORK_DIR}/jopenacc.so $<
-	${JULIA} ${MANUALJLSRC} ${ARGS}
-
-plot:
-	${JULIA} miniW_output_display.jl
-
-all: fort fortacc julia jai
+	${FORTRAN} ${MACROS} -o miniweather_fort.exe $<
 	./miniweather_fort.exe
-	./ miniweather_fortacc.exe
+
+fopenacc: ${FORTACCSRC}
+	echo "*** FORTRAN OPENACC ***"
+	${FOPENACC} ${MACROS} -o miniweather_fortacc.exe $<
+	./miniweather_fortacc.exe
+
+fomptarget: ${FORTOMPSRC}
+	echo "*** FORTRAN OPENMP TARGET ***"
+	${FOMPTARGET} ${MACROS} -o miniweather_fortomp.exe $<
+	./miniweather_fortomp.exe
+
+julia_manual: ${MANUALFORTSRC}
+	echo "*** JULIA OPENACC MANUAL ***"
+	${FOPENACC} -o ${WORK_DIR}/jopenacc.so $<
+	${JULIA} ${MANUALJLSRC} ${SIM_OPTS}
 
 clean:
-	rm -rf *.so core *.mod .jaitmp *.o *.s *.exe output.nc data_roofline results.csv
+	rm -rf *.so core *.mod .jaitmp jaiwork *.o *.s *.exe output.nc data_roofline results.csv

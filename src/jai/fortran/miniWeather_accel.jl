@@ -36,22 +36,6 @@ import Printf.@printf
 import Libdl
 
 ##############
-# Accelerators
-##############
-
-const COMPILE_FORTRAN = "ftn -fPIC -shared -h noacc,noomp"
-
-const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl")
-const PATH_TEND_APPLY_KERNEL = joinpath(@__DIR__, "tend_apply.knl")
-const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl")
-const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl")
-const PATH_HALO_1RANK_KERNEL = joinpath(@__DIR__, "halo_1rank.knl")
-const PATH_HALO_SENDBUF_KERNEL = joinpath(@__DIR__, "halo_sendbuf.knl")
-const PATH_HALO_RECVBUF_KERNEL = joinpath(@__DIR__, "halo_recvbuf.knl")
-const PATH_HALO_INJECT_KERNEL = joinpath(@__DIR__, "halo_inject.knl")
-const PATH_HALO_Z_KERNEL = joinpath(@__DIR__, "halo_z.knl")
-
-##############
 # constants
 ##############
     
@@ -88,6 +72,9 @@ s = ArgParseSettings()
         help = "data spec"
         arg_type = Int64
         default = 2
+    "--fortran"
+        help = "fortran compile command"
+        default = "gfortran -fpic -shared"
     "--outfile", "-o"
         help = "output file path"
         default = "output.nc"
@@ -101,6 +88,22 @@ s = ArgParseSettings()
 end
 
 parsed_args = parse_args(ARGS, s)
+
+##############
+# Accelerators
+##############
+
+const COMPILE_FORTRAN = parsed_args["fortran"]
+
+const PATH_REDUCTION_KERNEL = joinpath(@__DIR__, "reduction.knl")
+const PATH_TEND_APPLY_KERNEL = joinpath(@__DIR__, "tend_apply.knl")
+const PATH_TEND_X_KERNEL = joinpath(@__DIR__, "tend_x.knl")
+const PATH_TEND_Z_KERNEL = joinpath(@__DIR__, "tend_z.knl")
+const PATH_HALO_1RANK_KERNEL = joinpath(@__DIR__, "halo_1rank.knl")
+const PATH_HALO_SENDBUF_KERNEL = joinpath(@__DIR__, "halo_sendbuf.knl")
+const PATH_HALO_RECVBUF_KERNEL = joinpath(@__DIR__, "halo_recvbuf.knl")
+const PATH_HALO_INJECT_KERNEL = joinpath(@__DIR__, "halo_inject.knl")
+const PATH_HALO_Z_KERNEL = joinpath(@__DIR__, "halo_z.knl")
 
 const SIM_TIME    = parsed_args["simtime"]
 const NX_GLOB     = parsed_args["nx"]

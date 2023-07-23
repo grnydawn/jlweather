@@ -1,4 +1,6 @@
-*.toml
+Manifest.toml
+LocalPreferences.toml
 src
 .jaitmp
+jaiwork
 *.out

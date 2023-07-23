@@ -73,10 +73,12 @@ s = ArgParseSettings()
         help = "data spec"
         arg_type = Int64
         default = 2
-    "--framework", "-p"
-        help = "comma separated programming frameworks"
-        arg_type = String
-        default = "fortran"
+    "--fortran"
+        help = "fortran compile command"
+        default = "gfortran -fpic -shared"
+    "--hip"
+        help = "hip compile command"
+        default = "hipcc -shared -fPIC -lamdhip64 -g"
     "--outfile", "-o"
         help = "output file path"
         default = "output.nc"
@@ -99,19 +101,10 @@ const HERE = @__DIR__
 
 const THREADS_PER_BLOCK = 256
 
-active_frames = split(parsed_args["framework"], ",")
-
-const COMPILE_FOMPTARGET_CRAY = "fortran_omptarget" in active_frames ? "ftn -shared -fPIC -h omp,noacc" : nothing
-const COMPILE_FOPENACC_CRAY = "fortran_openacc" in active_frames ? "ftn -shared -fPIC -h acc,noomp" : nothing
-const COMPILE_FORTRAN = "fortran" in active_frames ? "ftn -fPIC -shared -h noacc,noomp" : nothing
-const COMPILE_HIP = "hip" in active_frames ? "hipcc -shared -fPIC -lamdhip64 -g" : nothing
-const COMPILE_CUDA = "cuda" in active_frames ? "nvcc --linker-options=\"-fPIC\" --compiler-options=\"-fPIC\" --shared -g" : nothing
-
-const USE_FOMPTARGET = "fortran_omptarget" in active_frames ? true : false
-const USE_FOPENACC = "fortran_openacc" in active_frames ? true : false
-const USE_FORTRAN = "fortran" in active_frames ? true : false
-const USE_CUDA = "cuda" in active_frames ? true : false
-const USE_HIP = "hip" in active_frames ? true : false
+const COMPILE_FORTRAN = parsed_args["fortran"]
+const COMPILE_HIP = parsed_args["hip"]
+const USE_FORTRAN = true
+const USE_HIP = true
 
 const SIM_TIME    = parsed_args["simtime"]
 const NX_GLOB     = parsed_args["nx"]
@@ -209,10 +202,7 @@ function main(args::Vector{String})
 
     @jaccel     framework(
                     hip=COMPILE_HIP,
-                    cuda=COMPILE_CUDA,
-                    fortran=COMPILE_FORTRAN,
-                    fortran_omptarget=COMPILE_FOMPTARGET_CRAY,
-                    fortran_openacc=COMPILE_FOPENACC_CRAY
+                    fortran=COMPILE_FORTRAN
                 ) device(
                     MYRANK%8
                 ) constant(

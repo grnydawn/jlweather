@@ -76,9 +76,21 @@ s = ArgParseSettings()
     "--workdir", "-w"
         help = "working directory path"
         default = ".jaitmp"
-    "--accel", "-a"
-        help = "comma-separated accelerator type(fortran, cpp, fortran_openacc, fortran_omptarget, cuda, hip)"
-        default = "fortran"
+    "--fortran"
+        help = "fortran compile command"
+        default = ""
+    "--fopenacc"
+        help = "fortran openacc compile command"
+        default = ""
+    "--fomptarget"
+        help = "fortran openacc compile command"
+        default = ""
+    "--cuda"
+        help = "cuda compile command"
+        default = ""
+    "--hip"
+        help = "hip compile command"
+        default = ""
     "--debugdir", "-b"
         help = "debugging output directory path"
         default = ".jaitmp"
@@ -95,19 +107,57 @@ const HERE = @__DIR__
 
 const THREADS_PER_BLOCK = 256
 
-active_frames = split(parsed_args["accel"], ",")
+if parsed_args["fortran"] == ""
+    const COMPILE_FORTRAN = nothing
+    const USE_FORTRAN = false
+else
+    const COMPILE_FORTRAN = parsed_args["fortran"]
+    const USE_FORTRAN = true
+end
 
-const COMPILE_FOMPTARGET_CRAY = "fortran_omptarget" in active_frames ? "ftn -shared -fPIC -h omp,noacc" : nothing
-const COMPILE_FOPENACC_CRAY = "fortran_openacc" in active_frames ? "ftn -shared -fPIC -h acc,noomp" : nothing
-const COMPILE_FORTRAN = "fortran" in active_frames ? "ftn -fPIC -shared -h noacc,noomp" : nothing
-const COMPILE_HIP = "hip" in active_frames ? "hipcc -shared -fPIC -lamdhip64 -g" : nothing
-const COMPILE_CUDA = "cuda" in active_frames ? "nvcc --linker-options=\"-fPIC\" --compiler-options=\"-fPIC\" --shared -g" : nothing
+if parsed_args["fopenacc"] == ""
+    const COMPILE_FOPENACC = nothing
+    const USE_FOPENACC = false
+else
+    const COMPILE_FOPENACC = parsed_args["fopenacc"]
+    const USE_FOPENACC = true
+end
 
-const USE_FOMPTARGET = "fortran_omptarget" in active_frames ? true : false
-const USE_FOPENACC = "fortran_openacc" in active_frames ? true : false
-const USE_FORTRAN = "fortran" in active_frames ? true : false
-const USE_CUDA = "cuda" in active_frames ? true : false
-const USE_HIP = "hip" in active_frames ? true : false
+if parsed_args["fomptarget"] == ""
+    const COMPILE_FOMPTARGET = nothing
+    const USE_FOMPTARGER = false
+else
+    const COMPILE_FOMPTARGET = parsed_args["fomptarget"]
+    const USE_FOMPTARGET = true
+end
+
+if parsed_args["cuda"] == ""
+    const COMPILE_CUDA = nothing
+    const USE_CUDA = false
+else
+    const COMPILE_CUDA = parsed_args["cuda"]
+    const USE_CUDA = true
+end
+
+if parsed_args["hip"] == ""
+    const COMPILE_HIP = nothing
+    const USE_HIP = false
+else
+    const COMPILE_HIP = parsed_args["hip"]
+    const USE_HIP = true
+end
+#
+#const COMPILE_FOMPTARGET= "fortran_omptarget" in active_frames ? "ftn -shared -fPIC -h omp,noacc" : nothing
+#const COMPILE_FOPENACC= "fortran_openacc" in active_frames ? "ftn -shared -fPIC -h acc,noomp" : nothing
+#const COMPILE_FORTRAN = "fortran" in active_frames ? "ftn -fPIC -shared -h noacc,noomp" : nothing
+#const COMPILE_HIP = "hip" in active_frames ? "hipcc -shared -fPIC -lamdhip64 -g" : nothing
+#const COMPILE_CUDA = "cuda" in active_frames ? "nvcc --linker-options=\"-fPIC\" --compiler-options=\"-fPIC\" --shared -g" : nothing
+#
+#const USE_FOMPTARGET = "fortran_omptarget" in active_frames ? true : false
+#const USE_FOPENACC = "fortran_openacc" in active_frames ? true : false
+#const USE_FORTRAN = "fortran" in active_frames ? true : false
+#const USE_CUDA = "cuda" in active_frames ? true : false
+#const USE_HIP = "hip" in active_frames ? true : false
 
 const SIM_TIME    = parsed_args["simtime"]
 const NX_GLOB     = parsed_args["nx"]
@@ -119,7 +169,6 @@ const DATA_SPEC   = parsed_args["dataspec"]
 const OUTFILE     = parsed_args["outfile"]
 const WORKDIR     = parsed_args["workdir"]
 const DEBUGDIR    = parsed_args["debugdir"]
-const ACCEL       = parsed_args["accel"]
 
 const NPER  = Float64(NX_GLOB)/NRANKS
 const I_BEG = trunc(Int, round(NPER* MYRANK)+1)
@@ -208,8 +257,8 @@ function main(args::Vector{String})
                     hip=COMPILE_HIP,
                     cuda=COMPILE_CUDA,
                     fortran=COMPILE_FORTRAN,
-                    fortran_omptarget=COMPILE_FOMPTARGET_CRAY,
-                    fortran_openacc=COMPILE_FOPENACC_CRAY
+                    fortran_omptarget=COMPILE_FOMPTARGET,
+                    fortran_openacc=COMPILE_FOPENACC
                 ) device(
                     MYRANK%8
                 ) constant(

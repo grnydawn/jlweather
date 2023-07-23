@@ -1,5 +1,0 @@
-pmc : L2CacheHit, GPUBusy, MemUnitBusy, VALUInsts
-pmc : VALUUtilization, VALUBusy, SALUBusy, SALUInsts
-pmc : VFetchInsts, SFetchInsts, VWriteInsts, FlatVMemInsts
-pmc : LDSInsts, FlatLDSInsts, GDSInsts, Wavefronts
-gpu: 0

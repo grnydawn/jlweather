@@ -5,7 +5,7 @@ WORK_DIR="/lustre/orion/cli115/proj-shared/grnydawn/jaiwork"
 
 # un-comment one of the following commands:
 
-#make julia   WORK_DIR="${WORK_DIR}"
+make julia   WORK_DIR="${WORK_DIR}"
 
 #make jai_all   WORK_DIR="${WORK_DIR}" FORTRAN="ftn -fPIC -shared -h noacc,noomp" 
 #make jai_all   WORK_DIR="${WORK_DIR}" FOPENACC="ftn -shared -fPIC -h acc,noomp" 
@@ -24,4 +24,4 @@ WORK_DIR="/lustre/orion/cli115/proj-shared/grnydawn/jaiwork"
 
 #make fomptarget FOMPTARGET="ftn -h omp,noacc"
 
-make julia_manual WORK_DIR="${WORK_DIR}" FOPENACC="ftn -fPIC -shared -h acc,noomp"
+#make julia_manual WORK_DIR="${WORK_DIR}" FOPENACC="ftn -fPIC -shared -h acc,noomp"

@@ -1,7 +1,10 @@
 
+# user info
+ACCOUNT=<your account>
+USERNAME=<your username>
 
 # change working directory
-WORK_DIR="./jaiwork"
+WORK_DIR="/lustre/orion/${ACCOUNT}/proj-shared/${USERNAME}/jaiwork"
 
 # un-comment one of the following commands:
 

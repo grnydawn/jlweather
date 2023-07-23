@@ -1,7 +1,7 @@
 
 
 # change working directory
-WORK_DIR="/lustre/orion/cli115/proj-shared/grnydawn/jaiwork"
+WORK_DIR="./jaiwork"
 
 # un-comment one of the following commands:
 
